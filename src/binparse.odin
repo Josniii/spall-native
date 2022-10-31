@@ -141,6 +141,7 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 			if !ok1 {
 				continue
 			}
+
 			t_idx, ok2 := vh_find(&trace.processes[p_idx].thread_map, temp_ev.thread_id)
 			if !ok2 {
 				continue

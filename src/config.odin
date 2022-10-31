@@ -45,11 +45,12 @@ setup_tid :: proc(trace: ^Trace, p_idx: int, thread_id: u32) -> int {
 }
 
 load_file :: proc(filename: string) -> Trace {
-	chunk_buffer := [1<<17]u8{}
+	chunk_buffer := make([]u8, 1 * 1024 * 1024)
+	defer delete(chunk_buffer)
 
 	trace := Trace{
 		processes = make([dynamic]Process),
-		process_map = vh_init(context.temp_allocator),
+		process_map = vh_init(),
 		total_max_time = 0,
 		total_min_time = 0x7fefffffffffffff,
 		event_count = 0,
@@ -69,7 +70,7 @@ load_file :: proc(filename: string) -> Trace {
 		push_fatal(SpallError.InvalidFile)
 	}
 
-	rd_sz, err3 := os.read(trace_fd, chunk_buffer[:])
+	rd_sz, err3 := os.read(trace_fd, chunk_buffer)
 	if err2 != 0 {
 		push_fatal(SpallError.InvalidFile)
 	}
@@ -93,7 +94,7 @@ load_file :: proc(filename: string) -> Trace {
 
 		p := &trace.parser
 		p.pos += header_sz
-		parse_binary(&trace, trace_fd, chunk_buffer[:], i64(rd_sz), total_size)
+		parse_binary(&trace, trace_fd, chunk_buffer, i64(rd_sz), total_size)
 	} else {
 		push_fatal(SpallError.InvalidFile)
 	}
