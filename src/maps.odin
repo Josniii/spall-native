@@ -102,6 +102,7 @@ PTEntry :: struct {
 ValHash :: struct {
 	entries: [dynamic]PTEntry,
 	hashes:  [dynamic]int,
+	resize_threshold: i64,
 }
 
 vh_init :: proc(allocator := context.allocator) -> ValHash {
@@ -111,6 +112,7 @@ vh_init :: proc(allocator := context.allocator) -> ValHash {
 	for i in 0..<len(v.hashes) {
 		v.hashes[i] = -1
 	}
+	v.resize_threshold = i64(f64(len(v.hashes)) * 0.75)
 	return v
 }
 
@@ -119,7 +121,7 @@ vh_hash :: proc "contextless" (key: u32) -> u32 {
 	return key * 2654435769
 }
 
-vh_find :: proc "contextless" (v: ^ValHash, key: u32, loc := #caller_location) -> (int, bool) {
+vh_find :: proc (v: ^ValHash, key: u32) -> (int, bool) {
 	hv := u64(vh_hash(key)) & u64(len(v.hashes) - 1)
 	for i: u64 = 0; i < u64(len(v.hashes)); i += 1 {
 		idx := (hv + i) & u64(len(v.hashes) - 1)
@@ -134,7 +136,7 @@ vh_find :: proc "contextless" (v: ^ValHash, key: u32, loc := #caller_location) -
 		}
 	}
 
-	return -1, false
+	push_fatal(SpallError.Bug)
 }
 
 vh_grow :: proc(v: ^ValHash) {
@@ -143,6 +145,7 @@ vh_grow :: proc(v: ^ValHash) {
 		v.hashes[i] = -1
 	}
 
+	v.resize_threshold = i64(f64(len(v.hashes)) * 0.75)
 	for entry, idx in v.entries {
 		vh_reinsert(v, entry, idx)
 	}
@@ -162,7 +165,7 @@ vh_reinsert :: proc "contextless" (v: ^ValHash, entry: PTEntry, v_idx: int) {
 }
 
 vh_insert :: proc(v: ^ValHash, key: u32, val: int) {
-	if len(v.entries) >= int(f64(len(v.hashes)) * 0.75) {
+	if i64(len(v.entries)) >= v.resize_threshold {
 		vh_grow(v)
 	}
 

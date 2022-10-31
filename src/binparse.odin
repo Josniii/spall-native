@@ -66,7 +66,7 @@ get_next_event :: #force_no_inline proc(trace: ^Trace, chunk: []u8, temp_ev: ^Te
 	return .PartialRead
 }
 
-bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: Event) -> (int, int, int) {
+bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event) -> (int, int, int) {
 	p_idx := setup_pid(trace, process_id)
 	t_idx := setup_tid(trace, p_idx, thread_id)
 
@@ -89,13 +89,14 @@ bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: Event) 
 
 	depth := &t.depths[t.current_depth]
 	t.current_depth += 1
-	append(&depth.bs_events, event)
+	append(&depth.bs_events, event^)
 
 	return p_idx, t_idx, len(depth.bs_events)-1
 }
 
 parse_binary :: #force_inline proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size, total_size: i64) {
 	temp_ev := TempEvent{}
+	ev := Event{}
 	p := &trace.parser
 
 	full_chunk := chunk_buffer[:read_size]
@@ -126,14 +127,13 @@ parse_binary :: #force_inline proc(trace: ^Trace, fd: os.Handle, chunk_buffer: [
 
 		#partial switch temp_ev.type {
 		case .Begin:
-			new_event := Event{
-				name = temp_ev.name,
-				duration = -1,
-				self_time = -1,
-				timestamp = temp_ev.timestamp,
-			}
+			ev.name = temp_ev.name
+			ev.args = temp_ev.args
+			ev.duration = -1
+			ev.self_time = -1
+			ev.timestamp = temp_ev.timestamp
 
-			p_idx, t_idx, e_idx := bin_push_event(trace, temp_ev.process_id, temp_ev.thread_id, new_event)
+			p_idx, t_idx, e_idx := bin_push_event(trace, temp_ev.process_id, temp_ev.thread_id, &ev)
 			thread := &trace.processes[p_idx].threads[t_idx]
 			stack_push_back(&thread.bande_q, e_idx)
 
