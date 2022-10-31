@@ -36,7 +36,7 @@ get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Binar
 			return .PartialRead
 		}
 
-		name := string(chunk[event_sz:event_sz+i64(event.name_len)])
+		name := string(data_start[event_sz:event_sz+i64(event.name_len)])
 
 		temp_ev.type = .Begin
 		temp_ev.timestamp = event.time
