@@ -106,6 +106,12 @@ Depth :: struct {
 	events: [dynamic]Event,
 }
 
+EVData :: struct {
+	idx: int,
+	depth: u16,
+	self_time: f64,
+}
+
 Thread :: struct {
 	min_time: f64,
 	max_time: f64,
@@ -118,7 +124,7 @@ Thread :: struct {
 	depths: [dynamic]Depth,
 	instants: [dynamic]Instant,
 
-	bande_q: Stack(int),
+	bande_q: Stack(EVData),
 }
 
 Process :: struct {

@@ -101,11 +101,15 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 	p := &trace.parser
 
 	full_chunk := chunk_buffer[:read_size]
-	for p.pos < total_size {
+	load_loop: for p.pos < total_size {
 		mem.zero(&temp_ev, size_of(TempEvent))
 		state := get_next_event(trace, full_chunk, &temp_ev)
 		#partial switch state {
 		case .PartialRead:
+			if p.pos + i64(size_of(spall.End_Event)) > i64(total_size) {
+				push_fatal(SpallError.InvalidFile)
+			}
+
 			p.offset = p.pos
 
 			_, err := os.seek(fd, p.pos, os.SEEK_SET)
@@ -128,12 +132,12 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 			ev.name = temp_ev.name
 			ev.args = temp_ev.args
 			ev.duration = -1
-			ev.self_time = -1
+			ev.self_time = 0
 			ev.timestamp = temp_ev.timestamp
 
 			p_idx, t_idx, e_idx := bin_push_event(trace, temp_ev.process_id, temp_ev.thread_id, &ev)
 			thread := &trace.processes[p_idx].threads[t_idx]
-			stack_push_back(&thread.bande_q, e_idx)
+			stack_push_back(&thread.bande_q, EVData{idx = e_idx, depth = thread.current_depth - 1, self_time = 0})
 
 			trace.event_count += 1
 		case .End:
@@ -149,15 +153,52 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 
 			thread := &trace.processes[p_idx].threads[t_idx]
 			if thread.bande_q.len > 0 {
-				e_idx := stack_pop_back(&thread.bande_q)
-
+				jev_data := stack_pop_back(&thread.bande_q)
 				thread.current_depth -= 1
+
 				depth := &thread.depths[thread.current_depth]
-				jev := &depth.events[e_idx]
+				jev := &depth.events[jev_data.idx]
 				jev.duration = temp_ev.timestamp - jev.timestamp
-				jev.self_time = jev.duration
+				jev.self_time = jev.duration - jev.self_time
 				thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
 				trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
+
+				if thread.bande_q.len > 0 {
+					parent_depth := &thread.depths[thread.current_depth - 1]
+					parent_ev := stack_peek_back(&thread.bande_q)
+
+					pev := &parent_depth.events[parent_ev.idx]
+
+					pev.self_time += jev.duration
+				}
+			}
+		}
+	}
+
+	// cleanup unfinished events
+	for process in &trace.processes {
+		for thread in &process.threads {
+			for thread.bande_q.len > 0 {
+				ev_data := stack_pop_back(&thread.bande_q)
+
+				depth := &thread.depths[ev_data.depth]
+				jev := &depth.events[ev_data.idx]
+
+				thread.max_time = max(thread.max_time, jev.timestamp)
+				trace.total_max_time = max(trace.total_max_time, jev.timestamp)
+
+				duration := bound_duration(jev, thread.max_time)
+				jev.self_time = duration - jev.self_time
+				jev.self_time = max(jev.self_time, 0)
+
+				if thread.bande_q.len > 0 {
+					parent_depth := &thread.depths[ev_data.depth - 1]
+					parent_ev := stack_peek_back(&thread.bande_q)
+
+					pev := &parent_depth.events[parent_ev.idx]
+					pev.self_time += duration
+					pev.self_time = max(pev.self_time, 0)
+				}
 			}
 		}
 	}
