@@ -29,7 +29,7 @@ void main() {
 
 	// if line
 	if (uv.y < 0) {
-		float width = uv.x * u_dpr;
+		float width = uv.x;
 		vec2 a = rect_pos.xy;
 		vec2 b = rect_pos.zw;
 		vec2 center = mix(a, b, 0.5);
@@ -45,8 +45,6 @@ void main() {
 		gl_Position = vec4((xy / u_resolution) * 2.0 - 1.0, 0.0, 1.0);
 		gl_Position.y = -gl_Position.y;
 
-		v_rect_pos = rect_pos;
-
 	// if rect
 	} else {
 		vec2 xy = vec2(rect_pos.x, rect_pos.y) + (idx_pos * vec2(rect_pos.z, rect_pos.w));
@@ -55,6 +53,7 @@ void main() {
 		gl_Position.y = -gl_Position.y;
 	}
 
+	v_rect_pos = rect_pos;
 	v_color = color;
 	v_uv = uv;
 }

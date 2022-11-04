@@ -188,10 +188,9 @@ main :: proc() {
 	real_window_width: i32
 	real_window_height: i32
 	SDL.GL_GetDrawableSize(window, &real_window_width, &real_window_height)
-	width := f64(real_window_width)
-	height := f64(real_window_height)
-	scale := f64(real_window_width) / f64(orig_window_width)
-					fmt.printf("(%f, %f), scale: %f\n", width, height, scale)
+	dpr := f64(real_window_width) / f64(orig_window_width)
+	width := f64(orig_window_width)
+	height := f64(orig_window_height)
 
 	rect_program, rect_prog_ok := gl.load_shaders_source(rect_vert_src, rect_frag_src)
 	if !rect_prog_ok {
@@ -293,8 +292,8 @@ main :: proc() {
 			case .WINDOWEVENT:
 				#partial switch event.window.event {
 				case .RESIZED:
-					width = f64(event.window.data1) * scale
-					height = f64(event.window.data2) * scale
+					width = f64(event.window.data1)
+					height = f64(event.window.data2)
 				}
 			case .DROPFILE:
 				filename := strings.clone_from_cstring(event.drop.file)
@@ -323,11 +322,11 @@ main :: proc() {
 			f32(bg_color2.z) / 255,
 			f32(bg_color2.w) / 255
 		)
-		gl.Viewport(0, 0, i32(width), i32(height))
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		gl.Uniform1f(rect_uniforms["u_dpr"].location, 1)
-		gl.Uniform2f(rect_uniforms["u_resolution"].location, f32(width), f32(height))
+		gl.Viewport(0, 0, i32(width * dpr), i32(height * dpr))
+		gl.Uniform1f(rect_uniforms["u_dpr"].location, f32(dpr))
+		gl.Uniform2f(rect_uniforms["u_resolution"].location, f32(width * dpr), f32(height * dpr))
 		gl.BindBuffer(gl.ARRAY_BUFFER, rect_deets_buffer)
 		gl.BindVertexArray(vao);
 
