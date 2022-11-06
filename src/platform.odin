@@ -56,11 +56,16 @@ reset_cursor :: proc() {
 	is_hovering = false
 }
 
+get_font :: proc(scale: FontSize, font_type: FontType) -> ^SDL_TTF.Font {
+	font_idx := (u32(font_type) * u32(FontSize.LastSize)) + u32(scale)
+	return all_fonts[font_idx]
+}
+
 get_text_height :: proc(scale: FontSize, font: FontType) -> f64 { 
 	#partial switch scale {
-	case .PSize: return 14
-	case .H1Size: return 16
-	case .H2Size: return 18
+	case .PSize: return p_height
+	case .H1Size: return h1_height
+	case .H2Size: return h2_height
 	}
 
 	push_fatal(SpallError.Bug)
@@ -70,30 +75,30 @@ measure_text :: proc(str: string, scale: FontSize, font_type: FontType) -> f64 {
 		return 0
 	}
 
-	font_idx := (u32(font_type) * u32(FontSize.LastSize)) + u32(scale)
-	font := all_fonts[font_idx]
-
+	font := get_font(scale, font_type)
 	potato := strings.clone_to_cstring(str, context.temp_allocator)
 
-	count: i32
 	width: i32
-	SDL_TTF.MeasureUTF8(font, potato, 100000000, &count, &width)
+	height: i32
+	SDL_TTF.SizeUTF8(font, potato, &width, &height)
 
-	return f64(width) * 8.0
+	return f64(width)
 }
 draw_text    :: proc(rects: ^[dynamic]DrawRect, str: string, pos: Vec2, scale: FontSize, font_type: FontType, color: BVec4) {
 	if len(str) == 0 {
 		return
 	}
 
-	font_idx := (u32(font_type) * u32(FontSize.LastSize)) + u32(scale)
-	font := all_fonts[font_idx]
-
+	font := get_font(scale, font_type)
 	potato := strings.clone_to_cstring(str, context.temp_allocator)
+
 	surface := SDL_TTF.RenderUTF8_Blended(font, potato, SDL.Color{color.x, color.y, color.z, color.w})
 
-	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, surface.pitch / 4, surface.h, gl.RGBA, gl.UNSIGNED_BYTE, surface.pixels)
-	append(rects, DrawRect{FVec4{f32(pos.x), f32(pos.y), f32(surface.w), f32(surface.h)}, color, FVec2{0.0, 0.0}})
+	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, (surface.pitch / 4), surface.h, gl.RGBA, gl.UNSIGNED_BYTE, surface.pixels)
+
+	x_pos := i32(pos.x)
+	y_pos := i32(pos.y)
+	append(rects, DrawRect{FVec4{f32(x_pos), f32(y_pos), f32(surface.w), f32(surface.h)}, color, FVec2{0.0, 0.0}})
 	
 	// flush. RIP
 	gl.BufferData(gl.ARRAY_BUFFER, len(rects)*size_of(rects[0]), raw_data(rects[:]), gl.DYNAMIC_DRAW)

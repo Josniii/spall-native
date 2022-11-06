@@ -142,7 +142,7 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 			ev.args = temp_ev.args
 			ev.duration = -1
 			ev.self_time = 0
-			ev.timestamp = temp_ev.timestamp
+			ev.timestamp = temp_ev.timestamp * trace.stamp_scale
 
 			p_idx, t_idx, e_idx := bin_push_event(trace, temp_ev.process_id, temp_ev.thread_id, &ev)
 			thread := &trace.processes[p_idx].threads[t_idx]
@@ -167,7 +167,7 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 
 				depth := &thread.depths[thread.current_depth]
 				jev := &depth.events[jev_data.idx]
-				jev.duration = temp_ev.timestamp - jev.timestamp
+				jev.duration = (temp_ev.timestamp * trace.stamp_scale) - jev.timestamp
 				jev.self_time = jev.duration - jev.self_time
 				thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
 				trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)

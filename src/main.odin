@@ -70,14 +70,14 @@ default_cursor: ^SDL.Cursor
 pointer_cursor: ^SDL.Cursor
 
 // font data
-em : f64 = 14.0
 p_height : f64 = 14
+em : f64 = p_height
 h1_height: f64 = 18
 h2_height: f64 = 16
 p_font_size := p_height
 h1_font_size := h1_height
 h2_font_size := h2_height
-ch_width : f64 = 1
+ch_width: f64 = 0
 thread_gap     : f64 = 8
 
 all_fonts: []^SDL_TTF.Font
@@ -152,7 +152,7 @@ reset_camera :: proc(trace: ^Trace, display_width: f64) {
 	cam.target_pan_x = cam.pan.x
 }
 
-grab_fonts :: proc(names: []string, sizes: []i32) -> []^SDL_TTF.Font {
+grab_fonts :: proc(names: []string, sizes: []f64) -> []^SDL_TTF.Font {
 	start_cstr := SDL.GetBasePath()
 	path_str := strings.clone_from_cstring(start_cstr)
 	fonts := make([dynamic]^SDL_TTF.Font)
@@ -162,12 +162,13 @@ grab_fonts :: proc(names: []string, sizes: []i32) -> []^SDL_TTF.Font {
 		full_path_cstring := strings.clone_to_cstring(full_path)
 		
 		for size in sizes {
-			font := SDL_TTF.OpenFont(full_path_cstring, size)
+			font := SDL_TTF.OpenFont(full_path_cstring, i32(size))
 			if font == nil {
 				fmt.printf("Failed to open %s @ %d\n", full_path_cstring, size)
 				push_fatal(SpallError.Bug)
 			}
 
+			SDL_TTF.SetFontHinting(font, SDL_TTF.HINTING_MONO)
 			append(&fonts, font)
 		}
 	}
@@ -185,8 +186,9 @@ main :: proc() {
 	SDL_TTF.Init()
 
 	names := []string{ "Montserrat-Regular.ttf", "FiraMono-Regular.ttf", "fontawesome-webfont.ttf" }
-	sizes := []i32{ 14, 16, 18 }
+	sizes := []f64{ p_height, h1_height, h2_height }
 	all_fonts = grab_fonts(names, sizes)
+	ch_width = measure_text("a", .PSize, .MonoFont)
 
 	GL_VERSION_MAJOR :: 3
 	GL_VERSION_MINOR :: 3
@@ -197,6 +199,8 @@ main :: proc() {
 	SDL.GL_SetSwapInterval(1)
 	SDL.GL_SetAttribute(.MULTISAMPLEBUFFERS, 1)
 	SDL.GL_SetAttribute(.MULTISAMPLESAMPLES, 16)
+
+	SDL.SetHint(SDL.HINT_MOUSE_FOCUS_CLICKTHROUGH, "1")
 
 	window := SDL.CreateWindow("spall", SDL.WINDOWPOS_CENTERED, SDL.WINDOWPOS_CENTERED, orig_window_width, orig_window_height, {.OPENGL, .RESIZABLE, .ALLOW_HIGHDPI})
 	if window == nil {
@@ -239,6 +243,8 @@ main :: proc() {
 	gl.BindTexture(gl.TEXTURE_2D, tex)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 4096, 4096, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
 
 	// Set up dynamic rect buffer

@@ -74,6 +74,10 @@ draw_graph :: proc(rects: ^[dynamic]DrawRect, header: string, history: ^queue.Qu
 	max_range := max_val - min_val
 	avg_val := sum_val / 100
 
+	text_width := measure_text(header, .PSize, .DefaultFont)
+	center_offset := (graph_size / 2) - (text_width / 2)
+	draw_text(rects, header, Vec2{pos.x + center_offset, pos.y}, .PSize, .DefaultFont, text_color)
+
 	graph_top := pos.y + em + line_gap
 	draw_rect(rects, rect(pos.x, graph_top, graph_size, graph_size), bg_color2)
 	draw_rect_outline(rects, rect(pos.x, graph_top, graph_size, graph_size), 2, outline_color)
@@ -86,9 +90,20 @@ draw_graph :: proc(rects: ^[dynamic]DrawRect, header: string, history: ^queue.Qu
 		low_height := graph_top + graph_size - graph_edge_pad - (em / 2)
 		avg_height := rescale(f64(avg_val), f64(min_val), f64(max_val), low_height, high_height)
 
+		high_str := fmt.tprintf("%d", max_val)
+		high_width := measure_text(high_str, .PSize, .DefaultFont) + line_gap
+		draw_text(rects, high_str, Vec2{(pos.x - 5) - high_width, high_height}, .PSize, .DefaultFont, text_color)
+
 		if queue.len(history^) > 90 {
 			draw_line(rects, Vec2{pos.x - 5, avg_height + (em / 2)}, Vec2{pos.x + 5, avg_height + (em / 2)}, 1, graph_color)
+			avg_str := fmt.tprintf("%d", avg_val)
+			avg_width := measure_text(avg_str, .PSize, .DefaultFont) + line_gap
+			draw_text(rects, avg_str, Vec2{(pos.x - 5) - avg_width, avg_height}, .PSize, .DefaultFont, text_color)
 		}
+
+		low_str := fmt.tprintf("%d", min_val)
+		low_width := measure_text(low_str, .PSize, .DefaultFont) + line_gap
+		draw_text(rects, low_str, Vec2{(pos.x - 5) - low_width, low_height}, .PSize, .DefaultFont, text_color)
 	}
 
 	graph_y_bounds := graph_size - (graph_edge_pad * 2)
