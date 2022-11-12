@@ -106,7 +106,7 @@ void main() {
 
 	// if textured rect
 	} else {
-		vec2 scaled_idx = v_idx_pos / 4096;
+		vec2 scaled_idx = v_idx_pos / textureSize(font_tex, 0);
 		scaled_idx.x *= v_rect_pos.z;
 		scaled_idx.y *= v_rect_pos.w;
 		vec2 uv_pos = scaled_idx;

@@ -95,7 +95,23 @@ draw_text    :: proc(rects: ^[dynamic]DrawRect, str: string, pos: Vec2, scale: F
 
 	surface := SDL_TTF.RenderUTF8_Blended(font, potato, SDL.Color{color.x, color.y, color.z, color.w})
 
-	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, (surface.pitch / 4), surface.h, gl.RGBA, gl.UNSIGNED_BYTE, surface.pixels)
+
+	pixels := make([]u8, surface.w * surface.h * 4)
+	SDL.ConvertPixels(surface.w, surface.h, surface.format.format, surface.pixels, surface.pitch,
+	                  surface.format.format, raw_data(pixels), surface.w * 4);
+
+	texture_handle : u32 = 0
+	gl.GenTextures(1, &texture_handle);
+	gl.ActiveTexture(gl.TEXTURE0);
+	gl.BindTexture(gl.TEXTURE_2D, texture_handle);
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, surface.w, surface.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(pixels));
+
+	delete(pixels)
+	SDL.FreeSurface(surface);
 
 	x_pos := i32(math.round(pos.x))
 	y_pos := i32(math.round(pos.y))
@@ -105,6 +121,8 @@ draw_text    :: proc(rects: ^[dynamic]DrawRect, str: string, pos: Vec2, scale: F
 	gl.BufferData(gl.ARRAY_BUFFER, len(rects)*size_of(rects[0]), raw_data(rects[:]), gl.DYNAMIC_DRAW)
 	gl.DrawElementsInstanced(gl.TRIANGLES, i32(len(indices)), gl.UNSIGNED_SHORT, nil, i32(len(rects)))
 	resize(rects, 0)
+
+	gl.DeleteTextures(1, &texture_handle);
 }
 
 open_file_dialog :: proc() {}
