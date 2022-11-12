@@ -56,15 +56,15 @@ button :: proc(rects: ^[dynamic]DrawRect, in_rect: Rect, label_text, tooltip_tex
 	return false
 }
 
-draw_graph :: proc(rects: ^[dynamic]DrawRect, header: string, history: ^queue.Queue(u32), pos: Vec2) {
+draw_graph :: proc(rects: ^[dynamic]DrawRect, header: string, history: ^queue.Queue(f64), pos: Vec2) {
 	line_width : f64 = 1
 	graph_edge_pad : f64 = 2 * em
 	line_gap := (em / 1.5)
 	graph_size: f64 = 150
 
-	max_val : u32 = 0
-	min_val : u32 = 100
-	sum_val : u32 = 0
+	max_val : f64 = 0
+	min_val : f64 = 1e5000
+	sum_val : f64 = 0
 	for i := 0; i < queue.len(history^); i += 1 {
 		entry := queue.get(history, i)
 		max_val = max(max_val, entry)
@@ -90,18 +90,18 @@ draw_graph :: proc(rects: ^[dynamic]DrawRect, header: string, history: ^queue.Qu
 		low_height := graph_top + graph_size - graph_edge_pad - (em / 2)
 		avg_height := rescale(f64(avg_val), f64(min_val), f64(max_val), low_height, high_height)
 
-		high_str := fmt.tprintf("%d", max_val)
+		high_str := fmt.tprintf("%f", max_val)
 		high_width := measure_text(high_str, .PSize, .DefaultFont) + line_gap
 		draw_text(rects, high_str, Vec2{(pos.x - 5) - high_width, high_height}, .PSize, .DefaultFont, text_color)
 
 		if queue.len(history^) > 90 {
 			draw_line(rects, Vec2{pos.x - 5, avg_height + (em / 2)}, Vec2{pos.x + 5, avg_height + (em / 2)}, 1, graph_color)
-			avg_str := fmt.tprintf("%d", avg_val)
+			avg_str := fmt.tprintf("%f", avg_val)
 			avg_width := measure_text(avg_str, .PSize, .DefaultFont) + line_gap
 			draw_text(rects, avg_str, Vec2{(pos.x - 5) - avg_width, avg_height}, .PSize, .DefaultFont, text_color)
 		}
 
-		low_str := fmt.tprintf("%d", min_val)
+		low_str := fmt.tprintf("%f", min_val)
 		low_width := measure_text(low_str, .PSize, .DefaultFont) + line_gap
 		draw_text(rects, low_str, Vec2{(pos.x - 5) - low_width, low_height}, .PSize, .DefaultFont, text_color)
 	}

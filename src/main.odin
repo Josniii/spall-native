@@ -84,7 +84,7 @@ all_fonts: []^SDL_TTF.Font
 
 build_hash := 0
 enable_debug := false
-fps_history: queue.Queue(u32)
+fps_history: queue.Queue(f64)
 
 t               : f64
 multiselect_t   : f64
@@ -306,7 +306,7 @@ main :: proc() {
 		last_tick = cur_tick
 
 		if queue.len(fps_history) > 100 { queue.pop_front(&fps_history) }
-		queue.push_back(&fps_history, u32(1 / dt))
+		queue.push_back(&fps_history, 1 / dt)
 
 		// update animation timers
 		greyanim_t = f32((t - multiselect_t) * 5)
