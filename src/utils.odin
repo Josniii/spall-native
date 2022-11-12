@@ -278,3 +278,7 @@ distance :: proc(p1, p2: Vec2) -> f64 {
 	dy := p2.y - p1.y
 	return math.sqrt((dx * dx) + (dy * dy))
 }
+
+geomean :: proc(a, b: f64) -> f64 {
+	return math.sqrt(a * b)
+}

@@ -6,5 +6,5 @@ copy "..\Odin\vendor\sdl2\SDL2.dll" "bin\SDL2.dll"
 copy "..\Odin\vendor\sdl2\ttf\SDL2_ttf.dll" "bin\SDL2_ttf.dll"
 copy "fonts\*.*" "bin"
 REM odin build src -subsystem:windows -collection:formats=formats -out:bin\spall.exe -no-bounds-check -o:speed
-REM odin build src -collection:formats=formats -out:bin\spall.exe -no-bounds-check -o:speed -debug -keep-temp-files
-odin build src -collection:formats=formats -out:bin\spall.exe -no-bounds-check -o:speed -debug -keep-temp-files
+REM odin build src -collection:formats=formats -out:bin\spall.exe -no-bounds-check -o:speed
+odin build src -collection:formats=formats -out:bin\spall.exe -no-bounds-check -debug -keep-temp-files

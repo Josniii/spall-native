@@ -586,12 +586,12 @@ render_tree :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pid, tid, did: int
 
 		// draw summary faketangle
 		min_width := 2.0
-		if range_width < min_width {
+		if (range_width / math.sqrt_f64(CHUNK_NARY_WIDTH)) < min_width {
 			y := height * f64(did)
 			h := height
 
 			x := cur_node.start_time
-			w := min_width
+			w := min_width * math.sqrt_f64(CHUNK_NARY_WIDTH)
 			xm := x * cam.target_scale
 
 			r_x   := x * cam.current_scale

@@ -157,7 +157,7 @@ Trace :: struct {
 	stamp_scale: f64,
 }
 
-BUCKET_SIZE :: 8
+BUCKET_SIZE :: 4
 CHUNK_NARY_WIDTH :: 4
 ChunkNode :: struct #packed {
 	start_time: f64,

@@ -188,7 +188,7 @@ main :: proc() {
 	SDL.Init({.VIDEO})
 	SDL_TTF.Init()
 
-	lru.init(&lru_text_cache, 100)
+	lru.init(&lru_text_cache, 1000)
 	lru_text_cache.on_remove = rm_text_cache
 
 	names := []string{ "Montserrat-Regular.ttf", "FiraMono-Regular.ttf", "fontawesome-webfont.ttf" }
@@ -493,6 +493,7 @@ main :: proc() {
 		clicked_on_rect = false
 		rect_count = 0
 		bucket_count = 0
+
 		draw_flamegraphs(&rects, &trace,
 			start_time, end_time, start_x, rect_height, info_pane_y,
 			graph_header_height, graph_header_text_height, top_line_gap, display_width)
