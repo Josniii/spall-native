@@ -3,6 +3,7 @@ package main
 import "core:strings"
 import "core:fmt"
 import "core:math"
+import "core:container/lru"
 
 import SDL "vendor:sdl2"
 import SDL_TTF "vendor:sdl2/ttf"
@@ -71,58 +72,73 @@ get_text_height :: proc(scale: FontSize, font: FontType) -> f64 {
 
 	push_fatal(SpallError.Bug)
 }
+
+rm_text_cache :: proc(key: LRU_Key, value: LRU_Text, udata: rawptr) {
+	handle := value.handle
+
+	delete(key.str)
+	gl.DeleteTextures(1, &handle)
+}
+
+get_text_cache :: proc(str: string, scale: FontSize, font_type: FontType) -> LRU_Text {
+	text_blob, ok := lru.get(&lru_text_cache, LRU_Key{ scale, font_type, str })
+	if !ok {
+		font := get_font(scale, font_type)
+
+		long_str := strings.clone(str)
+		potato := strings.clone_to_cstring(long_str, context.temp_allocator)
+		surface := SDL_TTF.RenderUTF8_Blended(font, potato, SDL.Color{255, 255, 255, 255})
+		width := surface.w
+		height := surface.h
+
+		pixels := make([]u8, width * height * 4)
+		SDL.ConvertPixels(width, height, surface.format.format, surface.pixels, surface.pitch,
+						  surface.format.format, raw_data(pixels), width * 4)
+		SDL.FreeSurface(surface)
+
+		handle : u32 = 0
+		gl.GenTextures(1, &handle)
+		gl.ActiveTexture(gl.TEXTURE0)
+		gl.BindTexture(gl.TEXTURE_2D, handle)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(pixels))
+		delete(pixels)
+
+		text_blob = LRU_Text{ handle, width, height }
+		lru.set(&lru_text_cache, LRU_Key{ scale, font_type, long_str }, text_blob)
+	}
+
+	return text_blob
+}
+
 measure_text :: proc(str: string, scale: FontSize, font_type: FontType) -> f64 {
 	if len(str) == 0 {
 		return 0
 	}
 
-	font := get_font(scale, font_type)
-	potato := strings.clone_to_cstring(str, context.temp_allocator)
-
-	width: i32
-	height: i32
-	SDL_TTF.SizeUTF8(font, potato, &width, &height)
-
-	return f64(width)
+	text_blob := get_text_cache(str, scale, font_type)
+	return f64(text_blob.width)
 }
-draw_text    :: proc(rects: ^[dynamic]DrawRect, str: string, pos: Vec2, scale: FontSize, font_type: FontType, color: BVec4) {
+
+draw_text :: proc(rects: ^[dynamic]DrawRect, str: string, pos: Vec2, scale: FontSize, font_type: FontType, color: BVec4) {
 	if len(str) == 0 {
 		return
 	}
 
-	font := get_font(scale, font_type)
-	potato := strings.clone_to_cstring(str, context.temp_allocator)
-
-	surface := SDL_TTF.RenderUTF8_Blended(font, potato, SDL.Color{color.x, color.y, color.z, color.w})
-
-
-	pixels := make([]u8, surface.w * surface.h * 4)
-	SDL.ConvertPixels(surface.w, surface.h, surface.format.format, surface.pixels, surface.pitch,
-	                  surface.format.format, raw_data(pixels), surface.w * 4);
-
-	texture_handle : u32 = 0
-	gl.GenTextures(1, &texture_handle);
-	gl.ActiveTexture(gl.TEXTURE0);
-	gl.BindTexture(gl.TEXTURE_2D, texture_handle);
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, surface.w, surface.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(pixels));
-
-	delete(pixels)
-	SDL.FreeSurface(surface);
+	text_blob := get_text_cache(str, scale, font_type)
+	gl.BindTexture(gl.TEXTURE_2D, text_blob.handle)
 
 	x_pos := i32(math.round(pos.x))
 	y_pos := i32(math.round(pos.y))
-	append(rects, DrawRect{FVec4{f32(x_pos), f32(y_pos), f32(surface.w), f32(surface.h)}, color, FVec2{0.0, 0.0}})
+	append(rects, DrawRect{FVec4{f32(x_pos), f32(y_pos), f32(text_blob.width), f32(text_blob.height)}, color, FVec2{0.0, 0.0}})
 	
 	// flush. RIP
 	gl.BufferData(gl.ARRAY_BUFFER, len(rects)*size_of(rects[0]), raw_data(rects[:]), gl.DYNAMIC_DRAW)
 	gl.DrawElementsInstanced(gl.TRIANGLES, i32(len(indices)), gl.UNSIGNED_SHORT, nil, i32(len(rects)))
 	resize(rects, 0)
-
-	gl.DeleteTextures(1, &texture_handle);
 }
 
 open_file_dialog :: proc() {}

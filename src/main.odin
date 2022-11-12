@@ -10,6 +10,7 @@ import "core:math"
 import "core:runtime"
 import "core:slice"
 import "core:container/queue"
+import "core:container/lru"
 
 import glm "core:math/linalg/glsl"
 
@@ -85,6 +86,8 @@ all_fonts: []^SDL_TTF.Font
 build_hash := 0
 enable_debug := false
 fps_history: queue.Queue(f64)
+lru_text_cache: lru.Cache(LRU_Key, LRU_Text)
+
 
 t               : f64
 multiselect_t   : f64
@@ -185,10 +188,12 @@ main :: proc() {
 	SDL.Init({.VIDEO})
 	SDL_TTF.Init()
 
+	lru.init(&lru_text_cache, 100)
+	lru_text_cache.on_remove = rm_text_cache
+
 	names := []string{ "Montserrat-Regular.ttf", "FiraMono-Regular.ttf", "fontawesome-webfont.ttf" }
 	sizes := []f64{ p_height, h1_height, h2_height }
 	all_fonts = grab_fonts(names, sizes)
-	ch_width = measure_text("a", .PSize, .MonoFont)
 
 	GL_VERSION_MAJOR :: 3
 	GL_VERSION_MINOR :: 3
@@ -196,7 +201,6 @@ main :: proc() {
 	SDL.GL_SetAttribute(.CONTEXT_MAJOR_VERSION, GL_VERSION_MAJOR)
 	SDL.GL_SetAttribute(.CONTEXT_MINOR_VERSION, GL_VERSION_MINOR)
 
-	SDL.GL_SetSwapInterval(-1)
 	SDL.GL_SetAttribute(.MULTISAMPLEBUFFERS, 1)
 	SDL.GL_SetAttribute(.MULTISAMPLESAMPLES, 8)
 
@@ -213,6 +217,7 @@ main :: proc() {
 
 	gl_context := SDL.GL_CreateContext(window)
 	gl.load_up_to(GL_VERSION_MAJOR, GL_VERSION_MINOR, SDL.gl_set_proc_address)
+	SDL.GL_SetSwapInterval(-1)
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -278,6 +283,8 @@ main :: proc() {
 	gl.GenBuffers(1, &rect_idx_buffer)
 	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, rect_idx_buffer)
 	gl.BufferData(gl.ELEMENT_ARRAY_BUFFER, len(indices)*size_of(indices[0]), raw_data(indices), gl.STATIC_DRAW)
+
+	ch_width = measure_text("a", .PSize, .MonoFont)
 	
 	trace: Trace
 	rects := make([dynamic]DrawRect)
@@ -300,7 +307,7 @@ main :: proc() {
 
 		cur_tick := time.tick_now()
 		duration := time.tick_since(start_tick)
-		t := time.duration_milliseconds(duration)
+		t = time.duration_milliseconds(duration)
 
 		dt := time.duration_seconds(time.tick_diff(last_tick, cur_tick))
 		last_tick = cur_tick
@@ -489,7 +496,7 @@ main :: proc() {
 		draw_flamegraphs(&rects, &trace,
 			start_time, end_time, start_x, rect_height, info_pane_y,
 			graph_header_height, graph_header_text_height, top_line_gap, display_width)
-
+ 
 		draw_minimap(&rects, &trace,
 			rect_height, mini_graph_width, display_height, mini_start_x, 
 			mini_graph_pad, mini_graph_padded_width, graph_header_text_height)
@@ -503,7 +510,7 @@ main :: proc() {
 		draw_line(&rects, Vec2{start_x, toolbar_height + time_bar_height}, Vec2{start_x, info_pane_y}, 1, line_color)
 		draw_line(&rects, Vec2{mini_start_x, toolbar_height + time_bar_height}, Vec2{mini_start_x, info_pane_y}, 1, line_color)
 
-		process_multiselect(&rects, &trace, pan_delta, dt, info_pane_y, rect_height)
+		render_one_more := process_multiselect(&rects, &trace, pan_delta, dt, info_pane_y, rect_height)
 		draw_stats(&rects, &trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width, info_line_count)
 		if resort_stats {
 			sort_stats(&trace)
@@ -531,6 +538,7 @@ main :: proc() {
 		// Phew... Ok, time to dump to the screen
 		gl.BufferData(gl.ARRAY_BUFFER, len(rects)*size_of(rects[0]), raw_data(rects), gl.DYNAMIC_DRAW)
 		gl.DrawElementsInstanced(gl.TRIANGLES, i32(len(indices)), gl.UNSIGNED_SHORT, nil, i32(len(rects)))
+
 		SDL.GL_SwapWindow(window)
 	}
 }

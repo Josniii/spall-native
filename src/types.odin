@@ -35,6 +35,18 @@ FontType :: enum u8 {
 	LastFont,
 }
 
+LRU_Key :: struct #packed {
+	size: FontSize,
+	type: FontType,
+	str: string,
+}
+
+LRU_Text :: struct {
+	handle: u32,
+	width: i32,
+	height: i32,
+}
+
 SpallError :: enum int {
 	NoError = 0,
 	OutOfMemory = 1,
