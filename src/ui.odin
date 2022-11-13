@@ -190,9 +190,9 @@ draw_toolbar :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, toolbar_height, w
 		}
 		cursor_x += button_width + button_pad
 
-		file_name_width := measure_text(trace.file_name, .H1Size, .DefaultFont)
+		file_name_width := measure_text(trace.base_name, .H1Size, .DefaultFont)
 		name_x := max((display_width / 2) - (file_name_width / 2), cursor_x)
-		draw_text(rects, trace.file_name, Vec2{name_x, (toolbar_height / 2) - (h1_height / 2)}, .H1Size, .DefaultFont, toolbar_text_color)
+		draw_text(rects, trace.base_name, Vec2{name_x, (toolbar_height / 2) - (h1_height / 2)}, .H1Size, .DefaultFont, toolbar_text_color)
 
 		// colormode button nonsense
 		color_text : string

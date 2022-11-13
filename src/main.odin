@@ -317,7 +317,7 @@ main :: proc() {
 
 	ch_width = measure_text("a", .PSize, .MonoFont)
 	
-	trace: Trace
+	trace := new(Trace)
 	rects := make([dynamic]DrawRect)
 
 	start_tick := time.tick_now()
@@ -440,14 +440,14 @@ main :: proc() {
 		gl.BindVertexArray(vao);
 
 		if start_trace != "" && !loading_config {
-			free_trace(&trace)
-			trace = Trace{}
+			free_trace(trace)
+			trace^ = Trace{}
 			loading_config = true
 
 			state := new(ThreadState)
 			state^ = ThreadState{
 				filename = start_trace,
-				trace = &trace,
+				trace = trace,
 			}
 			start_trace = ""
 			thread.create_and_start_with_data(state, threaded_config_load)
@@ -540,7 +540,7 @@ main :: proc() {
 
 		if post_loading {
 			if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 1000 }
-			reset_camera(&trace, display_width)
+			reset_camera(trace, display_width)
 			post_loading = false
 		}
 
@@ -565,21 +565,21 @@ main :: proc() {
 			did_pan = false
 			pressed_event = {-1, -1, -1, -1} // so no stale events are tracked
 		}
-		start_time, end_time, pan_delta := process_inputs(&trace, stat_pane, mini_graph_rect, dt, display_width, rect_height, start_x)
+		start_time, end_time, pan_delta := process_inputs(trace, stat_pane, mini_graph_rect, dt, display_width, rect_height, start_x)
 
 		clicked_on_rect = false
 		rect_count = 0
 		bucket_count = 0
 
-		draw_flamegraphs(&rects, &trace,
+		draw_flamegraphs(&rects, trace,
 			start_time, end_time, start_x, rect_height, info_pane_y,
 			graph_header_height, graph_header_text_height, top_line_gap, display_width)
  
-		draw_minimap(&rects, &trace,
+		draw_minimap(&rects, trace,
 			rect_height, mini_graph_width, display_height, mini_start_x, 
 			mini_graph_pad, mini_graph_padded_width, graph_header_text_height)
 
-		draw_topbars(&rects, &trace, 
+		draw_topbars(&rects, trace, 
 			width, height, display_width, graph_header_height, top_line_gap, 
 			start_x, toolbar_height, graph_header_text_height, time_bar_height, 
 			wide_graph_height, wide_graph_y, mini_graph_padded_width, start_time, end_time)
@@ -588,14 +588,14 @@ main :: proc() {
 		draw_line(&rects, Vec2{start_x, toolbar_height + time_bar_height}, Vec2{start_x, info_pane_y}, 1, line_color)
 		draw_line(&rects, Vec2{mini_start_x, toolbar_height + time_bar_height}, Vec2{mini_start_x, info_pane_y}, 1, line_color)
 
-		render_one_more := process_multiselect(&rects, &trace, pan_delta, dt, info_pane_y, rect_height)
-		draw_stats(&rects, &trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width, info_line_count)
+		render_one_more := process_multiselect(&rects, trace, pan_delta, dt, info_pane_y, rect_height)
+		draw_stats(&rects, trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width, info_line_count)
 		if resort_stats {
-			sort_stats(&trace)
+			sort_stats(trace)
 			resort_stats = false
 		}
 
-		draw_toolbar(&rects, &trace, toolbar_height, width, display_width)
+		draw_toolbar(&rects, trace, toolbar_height, width, display_width)
 
 		// reset the cursor if we're not over a selectable thing
 		if !is_hovering {
@@ -610,7 +610,7 @@ main :: proc() {
 
 		// if there's a rectangle tooltip to render, now's the time.
 		if rendered_rect_tooltip {
-			draw_rect_tooltip(&rects, &trace, dpr)
+			draw_rect_tooltip(&rects, trace, dpr)
 		}
 
 		// Phew... Ok, time to dump to the screen

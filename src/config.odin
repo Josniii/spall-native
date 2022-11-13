@@ -352,7 +352,8 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		total_min_time = 0x7fefffffffffffff,
 		event_count = 0,
 		stamp_scale = 1,
-		file_name = filepath.base(file_name),
+		base_name = filepath.base(file_name),
+		file_name = file_name,
 		string_block = make([dynamic]u8),
 		parser = init_parser(),
 	}

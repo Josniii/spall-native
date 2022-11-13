@@ -142,6 +142,7 @@ Instant :: struct #packed {
 
 Trace :: struct {
 	file_name: string,
+	base_name: string,
 	total_size: i64,
 	parser: Parser,
 	string_block: [dynamic]u8,
