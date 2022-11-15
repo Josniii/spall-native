@@ -605,8 +605,8 @@ main :: proc() {
 		draw_line(&rects, Vec2{start_x, toolbar_height + time_bar_height}, Vec2{start_x, info_pane_y}, 1, line_color)
 		draw_line(&rects, Vec2{mini_start_x, toolbar_height + time_bar_height}, Vec2{mini_start_x, info_pane_y}, 1, line_color)
 
-		render_one_more := process_multiselect(&rects, trace, pan_delta, dt, info_pane_y, rect_height)
-		draw_stats(&rects, trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width, info_line_count)
+		just_started, render_one_more := process_multiselect(&rects, trace, pan_delta, dt, info_pane_y, rect_height)
+		draw_stats(&rects, trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width, info_line_count, just_started)
 		if resort_stats {
 			sort_stats(trace)
 			resort_stats = false

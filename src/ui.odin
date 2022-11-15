@@ -1025,7 +1025,9 @@ draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, width, height, di
 	}
 }
 
-draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width: f64, info_line_count: int) {
+INITIAL_ITER :: 25_000
+FULL_ITER    :: 1_000_000
+draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width: f64, info_line_count: int, just_started: bool) {
 	// Render info pane back-covers
 	draw_line(rects, Vec2{0, info_pane_y}, Vec2{width, info_pane_y}, 1, line_color)
 	draw_rect(rects, rect(0, info_pane_y, width, height), bg_color) // bottom
@@ -1052,9 +1054,8 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 	// If we've got stats cooking already
 	} else if stats_state == .Started {
 		y := info_pane_y + top_line_gap
-
-		draw_text(rects, "Stats loading...", Vec2{x_subpad, y}, .PSize, .MonoFont, text_color)
-
+		center_x := width / 2
+		
 		total_count := 0
 		cur_count := 0
 		for range, r_idx in trace.selected_ranges {
@@ -1069,8 +1070,26 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 			}
 		}
 
-		progress_count := fmt.tprintf("%d of %d", cur_count, total_count)
-		draw_text(rects, progress_count, Vec2{x_subpad, y + em}, .PSize, .MonoFont, text_color)
+
+		loading_str := "Stats loading..."
+		progress_str := fmt.tprintf("%d of %d", cur_count, total_count)
+		hint_str := "Release multi-select to get the rest of the stats"
+
+		strs := []string{ loading_str, progress_str }
+		if just_started && total_count >= INITIAL_ITER {
+			strs = []string{ loading_str, progress_str, hint_str }
+		}
+
+		max_height := 0.0
+		for str in strs {
+			next_line(&max_height, em)
+		}
+
+		cur_y := y + ((height - y) / 2) - (max_height / 2)
+		for str in strs {
+			str_width := measure_text(str, .PSize, .DefaultFont)
+			draw_text(rects, str, Vec2{center_x - (str_width / 2), next_line(&cur_y, em)}, .PSize, .DefaultFont, text_color)
+		}
 
 	// If stats are ready to display
 	} else if stats_state == .Finished && did_multiselect {
@@ -1229,7 +1248,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 	}
 }
 
-process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta: Vec2, dt, info_pane_y, rect_height: f64) -> (render_one_more: bool) {
+process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta: Vec2, dt, info_pane_y, rect_height: f64) -> (just_started, render_one_more: bool) {
 	// Handle single-select
 	if mouse_up_now && !did_pan && pt_in_rect(clicked_pos, graph_rect) && pressed_event == released_event && !shift_down {
 		selected_event = released_event
@@ -1264,6 +1283,7 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		selected_event = {-1, -1, -1, -1}
 		info_pane_scroll = 0
 		info_pane_scroll_vel = 0
+		just_started = true
 
 		// try to fake a reduced frame of latency by extrapolating the position by the delta
 		mouse_pos_extrapolated := mouse_pos + 1 * Vec2{pan_delta.x, pan_delta.y} / dt * min(dt, 0.016)
@@ -1428,11 +1448,8 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		}
 	}
 
-	INITIAL_ITER :: 25_000
-	FULL_ITER    :: 1_000_000
 	if stats_state == .Started && did_multiselect {
 		event_count := 0
-		just_started := cur_stat_offset.range_idx == 0 && cur_stat_offset.event_idx == 0
 		iter_max := just_started ? INITIAL_ITER : FULL_ITER
 
 		broke_early := false
