@@ -136,7 +136,7 @@ in_free :: proc(v: ^INMap) {
 	delete(v.hashes)
 }
 
-in_hash :: proc (key: string) -> u32 #no_bounds_check {
+in_hash :: proc (key: string) -> u32 {
 	k := transmute([]u8)key
 	return #force_inline hash.murmur32(k)
 }
@@ -280,7 +280,7 @@ sm_init :: proc(allocator := context.allocator) -> StatMap {
 	}
 	return v
 }
-sm_hash :: proc (key: INStr) -> u32 #no_bounds_check {
+sm_hash :: proc (key: INStr) -> u32 {
 	return u32(key.start) * 2654435769
 }
 sm_reinsert :: proc (v: ^StatMap, entry: StatEntry, v_idx: int) {
@@ -326,7 +326,7 @@ sm_get :: proc(v: ^StatMap, key: INStr) -> (^Stats, bool) {
 
 	push_fatal(SpallError.Bug)
 }
-sm_insert :: proc(v: ^StatMap, key: INStr, val: Stats) -> ^Stats #no_bounds_check {
+sm_insert :: proc(v: ^StatMap, key: INStr, val: Stats) -> ^Stats {
 	if i64(len(v.entries)) >= v.resize_threshold {
 		sm_grow(v)
 	}
@@ -337,10 +337,10 @@ sm_insert :: proc(v: ^StatMap, key: INStr, val: Stats) -> ^Stats #no_bounds_chec
 
 		e_idx := v.hashes[idx]
 		if e_idx == -1 {
-			v.hashes[idx] = len(v.entries)
-
+			e_idx = len(v.entries)
+			v.hashes[idx] = e_idx
 			append(&v.entries, StatEntry{key, val})
-			return &v.entries[idx].val
+			return &v.entries[e_idx].val
 		} else if v.entries[e_idx].key.start == key.start {
 			v.entries[e_idx] = StatEntry{key, val}
 			return &v.entries[e_idx].val

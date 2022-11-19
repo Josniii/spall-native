@@ -1025,8 +1025,8 @@ draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, width, height, di
 	}
 }
 
-INITIAL_ITER :: 25_000
-FULL_ITER    :: 1_000_000
+INITIAL_ITER :: 500_000
+FULL_ITER    :: 2_000_000
 draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_pane_height, top_line_gap, x_subpad, width, height, display_width: f64, info_line_count: int, just_started: bool) {
 	// Render info pane back-covers
 	draw_line(rects, Vec2{0, info_pane_y}, Vec2{width, info_pane_y}, 1, line_color)
@@ -1477,12 +1477,12 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 				}
 
 				duration := bound_duration(ev, thread.max_time)
-
 				name := in_getstr(&trace.string_block, ev.name)
 				s, ok := sm_get(&trace.stats, ev.name)
 				if !ok {
 					s = sm_insert(&trace.stats, ev.name, Stats{min_time = 1e308})
 				}
+
 				s.count += 1
 				s.total_time += duration
 				s.self_time += ev.self_time
