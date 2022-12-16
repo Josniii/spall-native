@@ -296,7 +296,7 @@ draw_toolbar :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, toolbar_height, w
 
 		// Process All Events
 		if button(rects, rect(cursor_x, (toolbar_height / 2) - (button_height / 2), button_width, button_height), "\uf1fe", "get stats for the whole file", .IconFont, 0, width) {
-			stats_state = .Started
+			stats_state = .Pass1
 			did_multiselect = true
 			total_tracked_time = 0.0
 			cur_stat_offset = StatOffset{}
@@ -1166,7 +1166,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 		draw_text(rects, fmt.tprintf(" self time:%s", time_fmt(event.self_time)), Vec2{x_subpad, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 
 	// If we've got stats cooking already
-	} else if stats_state == .Started {
+	} else if stats_state == .Pass1 || stats_state == .Pass2 {
 		y := info_pane_y + top_line_gap
 		center_x := width / 2
 		
@@ -1422,7 +1422,7 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		}
 
 		// set multiselect flags
-		stats_state = .Started
+		stats_state = .Pass1
 		did_multiselect = true
 		total_tracked_time = 0.0
 		cur_stat_offset = StatOffset{}
@@ -1594,80 +1594,103 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		}
 	}
 
-	if stats_state == .Started && did_multiselect {
+	if (stats_state == .Pass1 || stats_state == .Pass2) && did_multiselect {
 		event_count := 0
 		iter_max := just_started ? INITIAL_ITER : FULL_ITER
 
 		broke_early := false
-		range_loop: for range, r_idx in trace.selected_ranges {
-			start_idx := range.start
-			if cur_stat_offset.range_idx > r_idx {
-				continue
-			} else if cur_stat_offset.range_idx == r_idx {
-				start_idx = max(start_idx, cur_stat_offset.event_idx)
+		if stats_state == .Pass1 {
+			pass1_range_loop: for range, r_idx in trace.selected_ranges {
+				start_idx := range.start
+				if cur_stat_offset.range_idx > r_idx {
+					continue
+				} else if cur_stat_offset.range_idx == r_idx {
+					start_idx = max(start_idx, cur_stat_offset.event_idx)
+				}
+
+				thread := trace.processes[range.pid].threads[range.tid]
+				events := thread.depths[range.did].events[start_idx:range.end]
+
+				for ev, e_idx in events {
+					if event_count > iter_max {
+						cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
+						broke_early = true
+						break pass1_range_loop
+					}
+
+					duration := bound_duration(ev, thread.max_time)
+					name := in_getstr(&trace.string_block, ev.name)
+					s, ok := sm_get(&trace.stats, ev.name)
+					if !ok {
+						s = sm_insert(&trace.stats, ev.name, Stats{min_time = 1e308})
+					}
+
+					s.count += 1
+					s.total_time += duration
+					s.self_time += ev.self_time
+					s.min_time = min(s.min_time, duration)
+					s.max_time = max(s.max_time, duration)
+					total_tracked_time += duration
+
+					event_count += 1
+				}
+
 			}
 
-			thread := trace.processes[range.pid].threads[range.tid]
-			events := thread.depths[range.did].events[start_idx:range.end]
-
-			for ev, e_idx in events {
-/*
-				if event_count > iter_max {
-					cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
-					broke_early = true
-					break range_loop
-				}
-*/
-
-				duration := bound_duration(ev, thread.max_time)
-				name := in_getstr(&trace.string_block, ev.name)
-				s, ok := sm_get(&trace.stats, ev.name)
-				if !ok {
-					s = sm_insert(&trace.stats, ev.name, Stats{min_time = 1e308})
-				}
-
-				s.count += 1
-				s.total_time += duration
-				s.self_time += ev.self_time
-				s.min_time = min(s.min_time, duration)
-				s.max_time = max(s.max_time, duration)
-				total_tracked_time += duration
-
-				event_count += 1
-			}
-
-			for ev, e_idx in events {
-				duration := bound_duration(ev, thread.max_time)
-				name := in_getstr(&trace.string_block, ev.name)
-				s, ok := sm_get(&trace.stats, ev.name)
-				assert(ok == true)
-
-				assert(duration <= s.max_time)
-				assert(s.max_time - s.min_time >= 0)
-				if (s.max_time - s.min_time <= 0) {
-					s.hist[50] += 1
-				} else {
-					t := (duration - s.min_time) / (s.max_time - s.min_time)
-					t = min(1, max(t, 0))
-					t *= 99
-
-					assert(t < 100)
-					s.hist[u32(t)] += 1
-				}
+			if !broke_early {
+				stats_state = .Pass2
+				cur_stat_offset = StatOffset{}
 			}
 		}
 
-		if !broke_early {
-			for i := 0; i < len(trace.stats.entries); i += 1 {
-				stat := &trace.stats.entries[i].val
-				stat.avg_time = stat.total_time / f64(stat.count)
+		if stats_state == .Pass2 {
+			pass2_range_loop: for range, r_idx in trace.selected_ranges {
+				start_idx := range.start
+				if cur_stat_offset.range_idx > r_idx {
+					continue
+				} else if cur_stat_offset.range_idx == r_idx {
+					start_idx = max(start_idx, cur_stat_offset.event_idx)
+				}
+
+				thread := trace.processes[range.pid].threads[range.tid]
+				events := thread.depths[range.did].events[start_idx:range.end]
+
+				for ev, e_idx in events {
+					if event_count > iter_max {
+						cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
+						broke_early = true
+						break pass2_range_loop
+					}
+
+					duration := bound_duration(ev, thread.max_time)
+					name := in_getstr(&trace.string_block, ev.name)
+					s, ok := sm_get(&trace.stats, ev.name)
+
+					if (s.max_time - s.min_time <= 0) {
+						s.hist[50] += 1
+					} else {
+						t := (duration - s.min_time) / (s.max_time - s.min_time)
+						t = min(1, max(t, 0))
+						t *= 99
+						s.hist[u32(t)] += 1
+					}
+
+					event_count += 1
+				}
 			}
 
-			self_sort :: proc(a, b: StatEntry) -> bool {
-				return a.val.self_time > b.val.self_time
+			if !broke_early {
+				for i := 0; i < len(trace.stats.entries); i += 1 {
+					stat := &trace.stats.entries[i].val
+					stat.avg_time = stat.total_time / f64(stat.count)
+				}
+
+				self_sort :: proc(a, b: StatEntry) -> bool {
+					return a.val.self_time > b.val.self_time
+				}
+				sm_sort(&trace.stats, self_sort)
+				stats_state = .Finished
 			}
-			sm_sort(&trace.stats, self_sort)
-			stats_state = .Finished
 		}
 	}
 

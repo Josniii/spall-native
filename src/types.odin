@@ -98,7 +98,8 @@ Range :: struct {
 }
 StatState :: enum {
 	NoStats,
-	Started,
+	Pass1,
+	Pass2,
 	Finished,
 }
 SortState :: enum {
