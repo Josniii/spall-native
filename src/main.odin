@@ -29,6 +29,7 @@ clicked        := false
 mouse_up_now   := false
 is_hovering    := false
 shift_down     := false
+ctrl_down      := false
 
 last_mouse_pos := Vec2{}
 mouse_pos      := Vec2{}
@@ -367,8 +368,12 @@ main :: proc() {
 				break main_loop
 			case .KEYDOWN:
 				#partial switch event.key.keysym.sym {
-				case .LSHIFT:
+				case .LSHIFT: fallthrough
+				case .RSHIFT:
 					shift_down = true
+				case .LCTRL: fallthrough
+				case .RCTRL:
+					ctrl_down = true
 				case .RETURN:
 					if event.key.keysym.mod & SDL.KMOD_ALT != (SDL.Keymod{}) {
 						should_toggle_fullscreen = true
@@ -378,8 +383,12 @@ main :: proc() {
 				}
 			case .KEYUP:
 				#partial switch event.key.keysym.sym {
-				case .LSHIFT:
+				case .LSHIFT: fallthrough
+				case .RSHIFT:
 					shift_down = false
+				case .LCTRL: fallthrough
+				case .RCTRL:
+					ctrl_down = false
 				}
 			case .MOUSEMOTION:
 				if frame_count != last_frame_count {
@@ -420,6 +429,9 @@ main :: proc() {
 				y_dist := f64(event.wheel.y) * -100
 				if event.wheel.direction == u32(SDL.SDL_MouseWheelDirection.FLIPPED) {
 					y_dist *= -1
+				}
+				if ctrl_down {
+					y_dist *= 10
 				}
 				scroll_val_y += y_dist
 			case .WINDOWEVENT:

@@ -102,12 +102,17 @@ StatState :: enum {
 	Pass2,
 	Finished,
 }
+StatEntry :: struct {
+	key: INStr,
+	val: Stats,
+}
 SortState :: enum {
 	SelfTime,
 	TotalTime,
 	MinTime,
 	MaxTime,
 	AvgTime,
+	Count,
 }
 StatOffset :: struct {
 	range_idx: int,

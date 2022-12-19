@@ -262,10 +262,6 @@ km_find :: proc (v: ^KeyMap, key: string) -> (FieldType, bool) {
 
 // Tracking for Stats
 SMMAP_LOAD_FACTOR :: 0.75
-StatEntry :: struct {
-	key: INStr,
-	val: Stats,
-}
 StatMap :: struct {
 	entries: [dynamic]StatEntry,
 	hashes:  [dynamic]int,

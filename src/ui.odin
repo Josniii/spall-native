@@ -1288,10 +1288,11 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 			total_text := fmt.tprintf("%10s", stat_fmt(stat.total_time))
 			total_perc_text := fmt.tprintf("%.1f%%", total_perc)
 
-			self_text := fmt.tprintf("%10s", stat_fmt(stat.self_time))
-			min_text := fmt.tprintf("%10s", stat_fmt(stat.min_time))
-			avg_text := fmt.tprintf("%10s", stat_fmt(stat.avg_time))
-			max_text := fmt.tprintf("%10s", stat_fmt(stat.max_time))
+			self_text  := fmt.tprintf("%10s", stat_fmt(stat.self_time))
+			min_text   := fmt.tprintf("%10s", stat_fmt(stat.min_time))
+			avg_text   := fmt.tprintf("%10s", stat_fmt(stat.avg_time))
+			max_text   := fmt.tprintf("%10s", stat_fmt(stat.max_time))
+			count_text := fmt.tprintf("%10s", fmt.tprintf("%d", stat.count))
 
 			text_outf(rects, &cursor, y, self_text, text_color2);   cursor += column_gap
 			{
@@ -1306,6 +1307,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 			text_outf(rects, &cursor, y, min_text, text_color2);   cursor += column_gap
 			text_outf(rects, &cursor, y, avg_text, text_color2);   cursor += column_gap
 			text_outf(rects, &cursor, y, max_text, text_color2);   cursor += column_gap
+			text_outf(rects, &cursor, y, count_text, text_color2);   cursor += column_gap
 
 			dr := rect(cursor, y_before, (display_width - cursor - column_gap) * stat.total_time / full_time, y_after - y_before)
 			cursor += column_gap / 2
@@ -1389,6 +1391,9 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 
 		max_header_text    := fmt.tprintf("%-10s", "   max.")
 		column_header(rects, &cursor, column_gap, y, info_pane_y, info_pane_height, max_header_text, .MaxTime)
+
+		max_count_text    := fmt.tprintf("%-10s", "   count")
+		column_header(rects, &cursor, column_gap, y, info_pane_y, info_pane_height, max_count_text, .Count)
 
 		name_header_text   := fmt.tprintf("%-10s", "   name")
 		text_outf(rects, &cursor, y, name_header_text, text_color)
@@ -1744,6 +1749,14 @@ sort_stats :: proc(trace: ^Trace) {
 				return a.val.max_time > b.val.max_time
 			} else {
 				return a.val.max_time < b.val.max_time
+			}
+		}
+	case .Count:
+		less = proc(a, b: StatEntry) -> bool {
+			if stat_sort_descending {
+				return a.val.count > b.val.count
+			} else {
+				return a.val.count < b.val.count
 			}
 		}
 	}
