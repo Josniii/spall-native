@@ -110,6 +110,9 @@ set_color_mode :: proc(auto: bool, is_dark: bool) {
 name_color_idx :: proc(trace: ^Trace, name: string) -> u32 {
 	return u32(uintptr(raw_data(name))) & u32(len(trace.color_choices) - 1)
 }
+cheap_name_color_idx :: proc(trace: ^Trace, name_idx: int) -> u32 {
+	return u32(name_idx) & u32(len(trace.color_choices) - 1)
+}
 
 generate_color_choices :: proc(trace: ^Trace) {
 	for i := 0; i < len(trace.color_choices); i += 1 {

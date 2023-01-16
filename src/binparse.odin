@@ -149,8 +149,8 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 			}
 
 			thread := &trace.processes[p_idx].threads[t_idx]
-			stack_push_back(&thread.bande_q, EVData{idx = e_idx, depth = thread.current_depth - 1, self_time = 0})
-
+			ev_data := EVData{idx = e_idx, depth = thread.current_depth - 1}
+			stack_push_back(&thread.bande_q, ev_data)
 			trace.event_count += 1
 		case .End:
 			p_idx, ok1 := vh_find(&trace.process_map, temp_ev.process_id)

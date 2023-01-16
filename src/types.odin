@@ -229,7 +229,6 @@ Depth :: struct {
 EVData :: struct {
 	idx: int,
 	depth: u16,
-	self_time: f64,
 }
 
 Thread :: struct {

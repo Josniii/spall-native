@@ -644,7 +644,7 @@ process_event :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 		p_idx, t_idx, e_idx := json_push_event(trace, u32(ev.process_id), u32(ev.thread_id), &new_event)
 
 		thread := &trace.processes[p_idx].threads[t_idx]
-		stack_push_back(&thread.bande_q, EVData{idx = e_idx, depth = 0, self_time = -1})
+		stack_push_back(&thread.bande_q, EVData{idx = e_idx, depth = 0})
 	case .End:
 		p_idx, ok1 := vh_find(&trace.process_map, u32(ev.process_id))
 		if !ok1 {
