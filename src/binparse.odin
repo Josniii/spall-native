@@ -71,6 +71,7 @@ get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Binar
 		p.pos += event_sz + i64(event.size)
 		return .EventRead
 	case:
+		post_error(trace, "Invalid event type: %d in file!", data_start[0])
 		return .Failure
 	}
 
@@ -141,7 +142,6 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 			full_chunk = chunk_buffer[:rd_sz]
 			continue
 		case .Failure:
-			post_error(trace, "Failed to read file!")
 			return false
 		}
 

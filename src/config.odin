@@ -445,6 +445,14 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	}
 	free_trace_temps(trace)
 	if !parsed_properly {
+		error_temp := trace.error_storage
+		error_str_len := len(trace.error_message)
+
+		free_trace(trace)
+
+		trace^ = Trace{}
+		trace.error_storage = error_temp
+		trace.error_message = string(trace.error_storage[:error_str_len])
 		return
 	}
 
