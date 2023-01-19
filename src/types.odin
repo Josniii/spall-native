@@ -86,6 +86,12 @@ SpallError :: enum int {
 	FileFailure = 5,
 }
 
+BinaryState :: enum {
+	PartialRead,
+	EventRead,
+	Failure,
+}
+
 Camera :: struct {
 	pan: Vec2,
 	vel: Vec2,
@@ -150,6 +156,8 @@ EventType :: enum {
 	Metadata,
 	Sample,
 	Pad_Skip,
+	MicroBegin,
+	MicroEnd,
 }
 EventScope :: enum {
 	Global,

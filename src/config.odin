@@ -11,7 +11,8 @@ import "formats:spall"
 
 FileType :: enum {
 	Json,
-	SpallStream,
+	ManualStream,
+	AutoStream,
 }
 
 Parser :: struct {
@@ -411,16 +412,16 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	// parse header
 	full_chunk := chunk_buffer[:rd_sz]
 
-	header_sz := i64(size_of(spall.Header))
-	if i64(len(full_chunk)) < header_sz {
+	magic_sz := i64(size_of(u64))
+	if i64(len(full_chunk)) < magic_sz {
 		post_error(trace, "File %s too small to be valid!", file_name)
 		return
 	}
 
 	file_type: FileType
 	magic := (^u64)(raw_data(full_chunk))^
-	if magic == spall.MAGIC {
-		hdr := cast(^spall.Header)raw_data(full_chunk)
+	if magic == spall.MANUAL_MAGIC {
+		hdr := cast(^spall.Manual_Header)raw_data(full_chunk)
 		if hdr.version != 1 {
 			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
@@ -429,17 +430,32 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		trace.stamp_scale = hdr.timestamp_unit
 
 		p := &trace.parser
-		p.pos += header_sz
+		p.pos += size_of(spall.Manual_Header)
 
-		file_type = .SpallStream
+		file_type = .ManualStream
+	} else if magic == spall.AUTO_MAGIC {
+		hdr := cast(^spall.Auto_Header)raw_data(full_chunk)
+		if hdr.version != 1 {
+			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
+			return
+		}
+		
+		trace.stamp_scale = hdr.timestamp_unit
+
+		p := &trace.parser
+		p.pos += size_of(spall.Auto_Header)
+
+		file_type = .AutoStream
 	} else {
 		file_type = .Json
 	}
 
 	parsed_properly := false
 	#partial switch file_type {
-	case .SpallStream:
-		parsed_properly = parse_binary(trace, trace_fd, chunk_buffer, i64(rd_sz))
+	case .ManualStream:
+		parsed_properly = ms_parse(trace, trace_fd, chunk_buffer, i64(rd_sz))
+	case .AutoStream:
+		parsed_properly = as_parse(trace, trace_fd, chunk_buffer, i64(rd_sz))
 	case .Json:
 		parsed_properly = parse_json(trace, trace_fd, chunk_buffer)
 	}
@@ -457,7 +473,8 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	}
 
 	#partial switch file_type {
-	case .SpallStream:
+	case .ManualStream: fallthrough
+	case .AutoStream:
 		for process in &trace.processes {
 			slice.sort_by(process.threads[:], tid_sort_proc)
 		}

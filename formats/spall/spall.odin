@@ -1,15 +1,23 @@
 package spall
 
-MAGIC :: u64(0x0BADF00D)
+MANUAL_MAGIC :: u64(0x0BADF00D)
+AUTO_MAGIC   :: u64(0xABADF00D)
 
-Header :: struct #packed {
+Manual_Header :: struct #packed {
 	magic:          u64,
 	version:        u64,
 	timestamp_unit: f64,
 	must_be_0:      u64,
 }
 
-Event_Type :: enum u8 {
+Auto_Header :: struct #packed {
+	magic:          u64,
+	version:        u64,
+	timestamp_unit: f64,
+	base_address:   u64,
+}
+
+Manual_Event_Type :: enum u8 {
 	Invalid             = 0,
 	Custom_Data         = 1, // Basic readers can skip this.
 	StreamOver          = 2,
@@ -22,8 +30,24 @@ Event_Type :: enum u8 {
 	Pad_Skip            = 7,
 }
 
+Auto_Event_Type :: enum u8 {
+	Invalid    = 0,
+	MicroBegin = 1,
+	MicroEnd   = 2,
+}
+
+// MicroBegin/End type is packed into the high bits of time
+MicroBegin_Event :: struct #packed {
+	time_and_type: u64, 
+	address: u64,
+}
+
+MicroEnd_Event :: struct #packed {
+	time_and_type: u64,
+}
+
 Begin_Event :: struct #packed {
-	type:     Event_Type,
+	type:     Manual_Event_Type,
 	category: u8,
 	pid:      u32,
 	tid:      u32,
@@ -33,13 +57,13 @@ Begin_Event :: struct #packed {
 }
 
 End_Event :: struct #packed {
-	type: Event_Type,
+	type: Manual_Event_Type,
 	pid:  u32,
 	tid:  u32,
 	time: f64,
 }
 
 Pad_Skip :: struct #packed {
-	type: Event_Type,
+	type: Manual_Event_Type,
 	size:  u32,
 }

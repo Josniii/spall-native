@@ -7,13 +7,7 @@ import "core:mem"
 import "core:os"
 import "formats:spall"
 
-BinaryState :: enum {
-	PartialRead,
-	EventRead,
-	Failure,
-}
-
-get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> BinaryState {
+ms_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> BinaryState {
 	p := &trace.parser
 
 	header_sz := i64(size_of(u64))
@@ -22,7 +16,7 @@ get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Binar
 	}
 
 	data_start := chunk[chunk_pos(p):]
-	type := (^spall.Event_Type)(raw_data(data_start))^
+	type := (^spall.Manual_Event_Type)(raw_data(data_start))^
 	#partial switch type {
 	case .Begin:
 		event_sz := i64(size_of(spall.Begin_Event))
@@ -78,7 +72,7 @@ get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Binar
 	return .PartialRead
 }
 
-bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event) -> (int, int, int, bool) {
+ms_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event) -> (int, int, int, bool) {
 	p_idx := setup_pid(trace, process_id)
 	t_idx := setup_tid(trace, p_idx, thread_id)
 
@@ -112,7 +106,7 @@ bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event)
 	return p_idx, t_idx, len(depth.events)-1, true
 }
 
-parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size: i64) -> bool {
+ms_parse :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size: i64) -> bool {
 	temp_ev := TempEvent{}
 	ev := Event{}
 	p := &trace.parser
@@ -121,7 +115,7 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 	full_chunk := chunk_buffer[:read_size]
 	load_loop: for p.pos < trace.total_size {
 		mem.zero(&temp_ev, size_of(TempEvent))
-		state := get_next_event(trace, full_chunk, &temp_ev)
+		state := ms_get_next_event(trace, full_chunk, &temp_ev)
 		#partial switch state {
 		case .PartialRead:
 			if p.pos == last_read {
@@ -153,7 +147,7 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 			ev.self_time = 0
 			ev.timestamp = temp_ev.timestamp * trace.stamp_scale
 
-			p_idx, t_idx, e_idx, ok := bin_push_event(trace, temp_ev.process_id, temp_ev.thread_id, &ev)
+			p_idx, t_idx, e_idx, ok := ms_push_event(trace, temp_ev.process_id, temp_ev.thread_id, &ev)
 			if !ok {
 				return false
 			}
