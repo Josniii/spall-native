@@ -14,7 +14,7 @@ Auto_Header :: struct #packed {
 	magic:          u64,
 	version:        u64,
 	timestamp_unit: f64,
-	base_address:   u64,
+	known_address:  u64,
 }
 
 Manual_Event_Type :: enum u8 {

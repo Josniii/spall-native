@@ -458,9 +458,11 @@ main :: proc() {
 				}
 			case .MOUSEWHEEL:
 				y_dist := f64(event.wheel.y) * -100
+/*
 				if event.wheel.direction == u32(SDL.SDL_MouseWheelDirection.FLIPPED) {
 					y_dist *= -1
 				}
+*/
 				if ctrl_down {
 					y_dist *= 10
 				}
