@@ -382,7 +382,7 @@ skip_to_start_or_end :: proc(trace: ^Trace, chunk: []u8) -> JSONState {
 process_key_value :: proc(trace: ^Trace, ev: ^TempEvent, key: FieldType, value: string) -> bool #no_bounds_check {
 	#partial switch key {
 	case .Name:
-		str := in_get(&trace.parser.intern, &trace.string_block, value)
+		str := in_get(&trace.intern, &trace.string_block, value)
 		ev.name = str
 	case .Ph:
 		if len(value) != 1 {
@@ -509,7 +509,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 		}
 
 		for node in chunk.data.cpuProfile.nodes {
-			func_name := in_get(&p.intern, &trace.string_block, node.callFrame.functionName)
+			func_name := in_get(&trace.intern, &trace.string_block, node.callFrame.functionName)
 			is_other := node.callFrame.codeType == "other"
 			profile.nodes[node.id] = SampleNode{
 				id = node.id,
@@ -601,7 +601,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 					node := profile.nodes[node_id]
 
 					if node.name.len == 0 {
-						node.name = in_get(&p.intern, &trace.string_block, "(anonymous)")
+						node.name = in_get(&trace.intern, &trace.string_block, "(anonymous)")
 					}
 
 					mem.zero(&new_event, size_of(Event))
@@ -689,7 +689,7 @@ process_event :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 				return false
 			}
 
-			name := in_get(&trace.parser.intern, &trace.string_block, m_name)
+			name := in_get(&trace.intern, &trace.string_block, m_name)
 
 			if meta_str == "thread_name" {
 				p_idx := setup_pid(trace, ev.process_id)
@@ -791,7 +791,7 @@ process_next_json_event :: proc(trace: ^Trace, jp: ^JSONParser, chunk: []u8) -> 
 
 				// skip storing args: {}
 				if len(str) > 2 {
-					ev.args = in_get(&trace.parser.intern, &trace.string_block, str)
+					ev.args = in_get(&trace.intern, &trace.string_block, str)
 				}
 
 				key_type = .Invalid

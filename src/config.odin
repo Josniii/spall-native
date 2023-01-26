@@ -18,19 +18,9 @@ FileType :: enum {
 Parser :: struct {
 	pos: i64,
 	offset: i64,
-	intern: INMap,
 }
 real_pos :: proc(p: ^Parser) -> i64 { return p.pos }
 chunk_pos :: proc(p: ^Parser) -> i64 { return p.pos - p.offset }
-init_parser :: proc() -> Parser {
-	p := Parser{
-		intern = in_init(),
-	}
-	return p
-}
-free_parser :: proc(p: ^Parser) {
-	in_free(&p.intern)
-}
 get_chunk :: proc(p: ^Parser, fd: os.Handle, chunk_buffer: []u8) -> (int, bool) {
 	_, err := os.seek(fd, p.pos, os.SEEK_SET)
 	if err != 0 {
@@ -78,7 +68,8 @@ free_trace_temps :: proc(trace: ^Trace) {
 		vh_free(&process.thread_map)
 	}
 	vh_free(&trace.process_map)
-	free_parser(&trace.parser)
+	in_free(&trace.intern)
+	delete(trace.addr_map)
 }
 
 free_trace :: proc(trace: ^Trace) {
@@ -381,7 +372,9 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		base_name = filepath.base(file_name),
 		file_name = file_name,
 		string_block = make([dynamic]u8),
-		parser = init_parser(),
+		intern = in_init(),
+		addr_map = make(map[u64]INStr),
+		parser = Parser{},
 		error_message = "",
 	}
 
@@ -443,13 +436,14 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
 		}
-		
-		trace.stamp_scale = hdr.timestamp_unit
-
 		if total_size < i64(size_of(spall.Auto_Header)) + i64(hdr.program_path_len) {
 			post_error(trace, "%s is invalid!", file_name)
 			return
 		}
+		
+		trace.stamp_scale = hdr.timestamp_unit
+		trace.skew_address = hdr.known_address
+
 
 		symbol_path := string(full_chunk[size_of(spall.Auto_Header):size_of(spall.Auto_Header)+hdr.program_path_len])
 

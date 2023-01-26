@@ -43,13 +43,15 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
 		event := (^spall.MicroBegin_Event)(raw_data(data_start))
 
-		tmp_buf := [34]byte{}
-		tmp_buf[0] = '0'
-		tmp_buf[1] = 'x'
-		name_str := strconv.append_uint(tmp_buf[2:], event.address, 16)
-
 		timestamp := f64((event.time_and_type << 8) >> 8)
-		name := in_get(&p.intern, &trace.string_block, string(tmp_buf[:len(name_str)+2]))
+		name, ok := trace.addr_map[event.address]
+		if !ok {
+			tmp_buf := [34]byte{}
+			tmp_buf[0] = '0'
+			tmp_buf[1] = 'x'
+			name_str := strconv.append_uint(tmp_buf[2:], event.address, 16)
+			name = in_get(&trace.intern, &trace.string_block, string(tmp_buf[:len(name_str)+2]))
+		}
 
 		ev := Event{
 			name = name,

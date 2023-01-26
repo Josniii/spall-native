@@ -36,7 +36,7 @@ ms_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Bi
 		temp_ev.timestamp = event.time
 		temp_ev.thread_id = event.tid
 		temp_ev.process_id = event.pid
-		temp_ev.name = in_get(&p.intern, &trace.string_block, name)
+		temp_ev.name = in_get(&trace.intern, &trace.string_block, name)
 
 		p.pos += event_sz + event_tail
 		return .EventRead

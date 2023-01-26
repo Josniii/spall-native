@@ -196,7 +196,11 @@ Trace :: struct {
 	base_name: string,
 	total_size: i64,
 	parser: Parser,
+	intern: INMap,
 	string_block: [dynamic]u8,
+
+	skew_address: u64,
+	addr_map: map[u64]INStr,
 	color_choices: [16]FVec3,
 
 	processes: [dynamic]Process,
