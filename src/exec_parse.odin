@@ -39,20 +39,43 @@ Mach_Symbol_Entry_64 :: struct #packed {
 }
 
 ELF_Header_64 :: struct #packed {
-	magic: [16]u8,
-	type: u16,
-	machine: u16,
-	version: u32,
-	entry: u64,
-	program_offset: u64,
-	section_offset: u64,
-	flags: u32,
-	elf_header_size: u16,
-	program_header_entry_size: u16,
-	program_header_count: u16,
-	section_header_entry_size: u16,
-	section_header_count: u16,
-	section_header_strtable_idx: u32,
+	magic:        [16]u8,
+	type:            u16,
+	machine:         u16,
+	version:         u32,
+	entry:           u64,
+	program_header_offset:  u64,
+	section_header_offset:  u64,
+	flags:           u32,
+	elf_header_size:             u16,
+	program_header_entry_size:   u16,
+	program_header_count:        u16,
+	section_header_entry_size:   u16,
+	section_header_count:        u16,
+	section_header_strtable_idx: u16,
+}
+
+ELF_Section_Header_64 :: struct #packed {
+	name:       u32,
+	type:       u32,
+	flags:      u64,
+	addr:       u64,
+	offset:     u64,
+	size:       u64,
+	link:       u32,
+	info:       u32,
+	addr_align: u64,
+	entry_size: u64,
+}
+
+STT_FUNC :: 2
+ELF_Sym_64 :: struct #packed {
+	name:            u32,
+	info:             u8,
+	other:            u8,
+	section_hdr_idx: u16,
+	value:           u64,
+	size:            u64,
 }
 
 ELF_MAGIC     := []u8{ 0x7f, 'E', 'L', 'F' }
@@ -166,10 +189,78 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	return true
 }
 
-load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
-	return false
+load_elf :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
+	if len(exec_buffer) < size_of(ELF_Header_64) {
+		return false
+	}
+
+	elf_header := (^ELF_Header_64)(raw_data(exec_buffer[:size_of(ELF_Header_64)]))
+	section_header := (^ELF_Section_Header_64)(raw_data(exec_buffer[elf_header.section_header_offset:elf_header.section_header_offset+size_of(ELF_Section_Header_64)]))
+
+	strtable_offset := elf_header.section_header_offset + (size_of(ELF_Section_Header_64) * u64(elf_header.section_header_strtable_idx))
+	section_strtable_header := (^ELF_Section_Header_64)(raw_data(exec_buffer[strtable_offset:strtable_offset+size_of(ELF_Section_Header_64)]))
+	strtable := exec_buffer[section_strtable_header.offset:]
+
+	symbol_table_idx : u64 = 0
+	symbol_table_str_idx : u64 = 0
+	i : u64 = 0
+	for ; i < u64(elf_header.section_header_count); i += 1 {
+		section_offset := elf_header.section_header_offset + (size_of(ELF_Section_Header_64) * i)
+		cur_hdr := (^ELF_Section_Header_64)(raw_data(exec_buffer[section_offset:section_offset+size_of(ELF_Section_Header_64)]))
+
+		section_name := string(transmute(cstring)raw_data(strtable[cur_hdr.name:]))
+		if section_name == ".symtab" {
+			symbol_table_idx = i
+			symbol_table_str_idx = u64(cur_hdr.link)
+			break
+		}
+	}
+	if i == u64(elf_header.section_header_count) {
+		return false
+	}
+
+	symbol_table_offset := elf_header.section_header_offset + (size_of(ELF_Section_Header_64) * u64(symbol_table_idx))
+	symbol_table_str_offset := elf_header.section_header_offset + (size_of(ELF_Section_Header_64) * u64(symbol_table_str_idx))
+	symbol_table := (^ELF_Section_Header_64)(raw_data(exec_buffer[symbol_table_offset:symbol_table_offset+size_of(ELF_Section_Header_64)]))
+	symbol_str_table := (^ELF_Section_Header_64)(raw_data(exec_buffer[symbol_table_str_offset:symbol_table_str_offset+size_of(ELF_Section_Header_64)]))
+
+	skew_size : u64 = 0
+	for i = 0; i < symbol_table.size; i += symbol_table.entry_size {
+		symbol_offset := symbol_table.offset + i
+		symbol := (^ELF_Sym_64)(raw_data(exec_buffer[symbol_offset:symbol_offset+size_of(ELF_Sym_64)]))
+
+        type := u8(symbol.info & 0xf)
+		symbol_name := string(transmute(cstring)raw_data(exec_buffer[symbol_str_table.offset+u64(symbol.name):]))
+        if type != STT_FUNC || symbol.value == 0 {
+            continue;
+        }
+
+		if symbol_name == "spall_auto_init" {
+			skew_size = trace.skew_address - u64(symbol.value)
+			fmt.printf("Found address to skew! %x, %x\n", symbol.value, skew_size)
+			break
+		}
+	}
+
+	for i = 0; i < symbol_table.size; i += symbol_table.entry_size {
+		symbol_offset := symbol_table.offset + i
+		symbol := (^ELF_Sym_64)(raw_data(exec_buffer[symbol_offset:symbol_offset+size_of(ELF_Sym_64)]))
+
+        type := u8(symbol.info & 0xf)
+        if type != STT_FUNC || symbol.value == 0 {
+            continue;
+        }
+
+		symbol_name := string(transmute(cstring)raw_data(exec_buffer[symbol_str_table.offset+u64(symbol.name):]))
+		interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
+
+		symbol_addr := symbol.value + skew_size
+		trace.addr_map[symbol_addr] = interned_symbol
+	}
+
+	return true
 }
 
-load_elf :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
+load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	return false
 }
