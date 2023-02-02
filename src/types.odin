@@ -17,7 +17,7 @@ Rect :: struct {
 }
 
 INStr :: struct #packed {
-	start: int,
+	start: i32,
 	len: u16,
 }
 

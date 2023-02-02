@@ -174,7 +174,7 @@ in_get :: proc(v: ^INMap, strings: ^[dynamic]u8, key: string) -> INStr {
 		if e_idx == -1 {
 			v.hashes[idx] = len(v.entries)
 
-			str_start := len(strings)
+			str_start := i32(len(strings))
 			in_str := INStr{str_start, u16(len(key))}
 			append_elem_string(strings, key)
 			append(&v.entries, in_str)
@@ -189,7 +189,7 @@ in_get :: proc(v: ^INMap, strings: ^[dynamic]u8, key: string) -> INStr {
 }
 
 in_getstr :: #force_inline proc(v: ^[dynamic]u8, s: INStr) -> string {
-	return string(v[s.start:s.start+int(s.len)])
+	return string(v[s.start:s.start+i32(s.len)])
 }
 
 KM_CAP :: 32
