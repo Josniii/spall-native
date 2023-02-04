@@ -108,11 +108,11 @@ EventID :: struct {
 	eid: i64,
 }
 Stats :: struct {
-	total_time: f64,
-	self_time: f64,
+	total_time: i64,
+	self_time: i64,
 	avg_time: f64,
-	min_time: f64,
-	max_time: f64,
+	min_time: i64,
+	max_time: i64,
 	count: u32,
 	hist: [100]f64,
 }
@@ -167,8 +167,8 @@ EventScope :: enum {
 TempEvent :: struct {
 	type: EventType,
 	scope: EventScope,
-	duration: f64,
-	timestamp: f64,
+	duration: i64,
+	timestamp: i64,
 	thread_id: u32,
 	process_id: u32,
 	name: u32,
@@ -176,14 +176,14 @@ TempEvent :: struct {
 }
 Instant :: struct #packed {
 	name: u32,
-	timestamp: f64,
+	timestamp: i64,
 }
 Event :: struct #packed {
 	name: u32,
 	args: u32,
-	timestamp: f64,
-	duration: f64,
-	self_time: f64,
+	timestamp: i64,
+	duration: i64,
+	self_time: i64,
 }
 
 Trace :: struct {
@@ -204,8 +204,8 @@ Trace :: struct {
 	stats: StatMap,
 	global_instants: [dynamic]Instant,
 
-	total_max_time: f64,
-	total_min_time: f64,
+	total_max_time: i64,
+	total_min_time: i64,
 	event_count: u64,
 	instant_count: u64,
 	stamp_scale: f64,
@@ -217,11 +217,11 @@ Trace :: struct {
 BUCKET_SIZE :: 4
 CHUNK_NARY_WIDTH :: 4
 ChunkNode :: struct #packed {
-	start_time: f64,
-	end_time: f64,
+	start_time: i64,
+	end_time: i64,
 
 	avg_color: FVec3,
-	weight: f64,
+	weight: i64,
 
 	tree_start_idx: uint,
 	event_start_idx: uint,
@@ -236,8 +236,8 @@ Depth :: struct {
 }
 
 Thread :: struct {
-	min_time: f64,
-	max_time: f64,
+	min_time: i64,
+	max_time: i64,
 	current_depth: u16,
 
 	id: u32,
@@ -251,7 +251,7 @@ Thread :: struct {
 }
 
 Process :: struct {
-	min_time: f64,
+	min_time: i64,
 	name: u32,
 
 	process_id: u32,
@@ -262,7 +262,7 @@ Process :: struct {
 
 init_process :: proc(process_id: u32) -> Process {
 	return Process{
-		min_time = 0x7fefffffffffffff, 
+		min_time = max(i64), 
 		process_id = process_id,
 		thread_map = vh_init(),
 		threads = make([dynamic]Thread),
@@ -276,7 +276,7 @@ free_process :: proc(process: ^Process) {
 
 init_thread :: proc(thread_id: u32) -> Thread {
 	t := Thread{
-		min_time = 0x7fefffffffffffff, 
+		min_time = max(i64), 
 		id = thread_id,
 		events = make([dynamic]Event),
 		depths = make([dynamic]Depth),

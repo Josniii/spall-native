@@ -29,7 +29,7 @@ Sample :: struct {
 ProfileState :: struct {
 	pid: u32,
 	tid: u32,
-	time: f64,
+	time: i64,
 	nodes: map[i64]SampleNode,
 	id_stack: Stack(Sample),
 }
@@ -406,14 +406,14 @@ process_key_value :: proc(trace: ^Trace, ev: ^TempEvent, key: FieldType, value: 
 			post_error(trace, "Invalid duration!")
 			return false
 		}
-		ev.duration = dur
+		ev.duration = i64(dur * 1000)
 	case .Ts: 
 		ts, ok := parse_f64(value)
 		if !ok {
 			post_error(trace, "Invalid timestamp!")
 			return false
 		}
-		ev.timestamp = ts
+		ev.timestamp = i64(ts * 1000)
 	case .Tid: 
 		tid, ok := parse_u32(value)
 		if !ok {
@@ -464,7 +464,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 			post_error(trace, "Invalid %s", meta_str)
 			return false
 		}
-		start_time, ok2 := data_map["startTime"].(json.Float)
+		start_time_us, ok2 := data_map["startTime"].(json.Float)
 		if !ok2 {
 			post_error(trace, "Invalid %s", meta_str)
 			return false
@@ -476,7 +476,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 		ps := ProfileState{
 			pid = ev.process_id,
 			tid = ev.thread_id,
-			time = start_time,
+			time = i64(start_time_us * 1000),
 			nodes = make(map[i64]SampleNode, 16),
 		}
 		stack_init(&ps.id_stack)
@@ -527,7 +527,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 				continue
 			}
 
-			profile.time += f64(delta)
+			profile.time += i64(delta * 1000)
 			stack_top_id : i64 = 0
 			if profile.id_stack.len > 0 {
 				tmp := stack_peek_back(&profile.id_stack)
@@ -827,9 +827,11 @@ process_next_json_event :: proc(trace: ^Trace, jp: ^JSONParser, chunk: []u8) -> 
 	return
 }
 
-parse_json :: proc (trace: ^Trace, fd: os.Handle, chunk_buffer: []u8) -> bool {
+json_parse :: proc (trace: ^Trace, fd: os.Handle, chunk_buffer: []u8) -> bool {
 	p := &trace.parser
 	jp := init_json_parser()
+
+	trace.stamp_scale /= 1000
 
 	// skip until we hit the start of the traceEvents arr
 	last_read: i64 = 0
@@ -913,7 +915,7 @@ parse_json :: proc (trace: ^Trace, fd: os.Handle, chunk_buffer: []u8) -> bool {
 	return true
 }
 
-json_patch_end :: proc(trace: ^Trace, p_idx, t_idx: int, e_idx: i64, end_time: f64) {
+json_patch_end :: proc(trace: ^Trace, p_idx, t_idx: int, e_idx: i64, end_time: i64) {
 	thread := &trace.processes[p_idx].threads[t_idx]
 	jev := &thread.events[e_idx]
 	jev.duration = end_time - jev.timestamp
@@ -979,8 +981,8 @@ instant_rendersort_proc :: proc(a, b: Instant) -> bool {
 }
 
 // duration bounding is important when sorting, we don't want to accidentally a -1 somewhere
-insertion_sort_events :: proc(events: []Event, max_time: f64) {
-	event_buildsort :: proc(max_time: f64, a, b: Event) -> bool {
+insertion_sort_events :: proc(events: []Event, max_time: i64) {
+	event_buildsort :: proc(max_time: i64, a, b: Event) -> bool {
 		if a.timestamp == b.timestamp {
 			_a := a
 			_b := b
@@ -1112,7 +1114,7 @@ json_generate_selftimes :: proc(trace: ^Trace) {
 					start_time := ev.timestamp - trace.total_min_time
 					end_time := ev.timestamp + bound_duration(&ev, tm.max_time) - trace.total_min_time
 
-					child_time := 0.0
+					child_time : i64 = 0
 					tree_stack[0] = depth.head; stack_len += 1
 					for stack_len > 0 {
 						stack_len -= 1
@@ -1131,7 +1133,7 @@ json_generate_selftimes :: proc(trace: ^Trace) {
 
 						if cur_node.tree_child_count == 0 {
 							scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
-							weight := 0.0
+							weight : i64 = 0
 							scan_loop: for scan_ev in &scan_arr {
 								scan_ev_start_time := scan_ev.timestamp - trace.total_min_time
 								if scan_ev_start_time < start_time {

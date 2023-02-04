@@ -166,6 +166,10 @@ in_get :: proc(v: ^INMap, strings: ^[dynamic]u8, key: string) -> u32 {
 		in_grow(v, strings)
 	}
 
+	if len(key) == 0 {
+		return 0
+	}
+
 	hv := u64(in_hash(key)) & u64(len(v.hashes) - 1)
 	for i: u64 = 0; i < u64(len(v.hashes)); i += 1 {
 		idx := (u64(hv) + i) & u64(len(v.hashes) - 1)

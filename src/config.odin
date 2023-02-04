@@ -84,11 +84,11 @@ free_trace :: proc(trace: ^Trace) {
 	delete(trace.file_name)
 }
 
-bound_duration :: proc(ev: ^Event, max_ts: f64) -> f64 {
+bound_duration :: proc(ev: ^Event, max_ts: i64) -> i64 {
 	return ev.duration < 0 ? (max_ts - ev.timestamp) : ev.duration
 }
 
-find_idx :: proc(trace: ^Trace, events: []Event, val: f64) -> int {
+find_idx :: proc(trace: ^Trace, events: []Event, val: i64) -> int {
 	low := 0
 	max := len(events)
 	high := max - 1
@@ -126,32 +126,32 @@ append_event :: proc(events: ^[dynamic]Event, ev: ^Event, loc := #caller_locatio
 	return
 }
 
-gen_event_color :: proc(trace: ^Trace, _events: []Event, thread_max: f64) -> (FVec3, f64) {
-	total_weight : f64 = 0
+gen_event_color :: proc(trace: ^Trace, _events: []Event, thread_max: i64) -> (FVec3, i64) {
+	total_weight : i64 = 0
 
 	events := _events
 
 	color := FVec3{}
-	color_weights := [len(trace.color_choices)]f64{}
+	color_weights := [len(trace.color_choices)]i64{}
 	for ev in &events {
 		idx := name_color_idx(trace, ev.name)
 
-		duration := f64(bound_duration(&ev, thread_max))
+		duration := bound_duration(&ev, thread_max)
 		if duration <= 0 {
 			//fmt.printf("weird duration: %d, %#v\n", duration, ev)
-			duration = 0.1
+			duration = 1
 		}
 		color_weights[idx] += duration
 		total_weight += duration
 	}
 
-	weights_sum : f64 = 0
+	weights_sum : i64 = 0
 	for weight, idx in color_weights {
 		color += trace.color_choices[idx] * f32(weight)
 		weights_sum += weight
 	}
 	if weights_sum <= 0 {
-		fmt.printf("Invalid weights sum! events: %d, %f, %f\n", len(events), weights_sum, total_weight)
+		fmt.printf("Invalid weights sum! events: %d, %d, %d\n", len(events), weights_sum, total_weight)
 		push_fatal(SpallError.Bug)
 	}
 	color /= f32(weights_sum)
@@ -304,7 +304,7 @@ generate_selftimes :: proc(trace: ^Trace) {
 					start_time := ev.timestamp - trace.total_min_time
 					end_time := ev.timestamp + bound_duration(&ev, tm.max_time) - trace.total_min_time
 
-					child_time := 0.0
+					child_time : i64 = 0
 					tree_stack[0] = depth.head; stack_len += 1
 					for stack_len > 0 {
 						stack_len -= 1
@@ -323,7 +323,7 @@ generate_selftimes :: proc(trace: ^Trace) {
 
 						if cur_node.tree_child_count == 0 {
 							scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
-							weight := 0.0
+							weight : i64 = 0
 							scan_loop: for scan_ev in &scan_arr {
 								scan_ev_start_time := scan_ev.timestamp - trace.total_min_time
 								if scan_ev_start_time < start_time {
@@ -363,8 +363,8 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		selected_ranges = make([dynamic]Range),
 		stats = sm_init(),
 		process_map = vh_init(),
-		total_max_time = 0,
-		total_min_time = 0x7fefffffffffffff,
+		total_max_time = min(i64),
+		total_min_time = max(i64),
 		event_count = 0,
 		stamp_scale = 1,
 		base_name = filepath.base(file_name),
@@ -467,7 +467,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	case .AutoStream:
 		parsed_properly = as_parse(trace, trace_fd, chunk_buffer, i64(rd_sz))
 	case .Json:
-		parsed_properly = parse_json(trace, trace_fd, chunk_buffer)
+		parsed_properly = json_parse(trace, trace_fd, chunk_buffer)
 	}
 	free_trace_temps(trace)
 	if !parsed_properly {

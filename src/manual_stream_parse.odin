@@ -33,7 +33,7 @@ ms_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Bi
 		name := string(data_start[event_sz:event_sz+i64(event.name_len)])
 
 		temp_ev.type = .Begin
-		temp_ev.timestamp = event.time
+		temp_ev.timestamp = i64(event.time * 1000)
 		temp_ev.thread_id = event.tid
 		temp_ev.process_id = event.pid
 		temp_ev.name = in_get(&trace.intern, &trace.string_block, name)
@@ -48,7 +48,7 @@ ms_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Bi
 		event := (^spall.End_Event)(raw_data(data_start))
 
 		temp_ev.type = .End
-		temp_ev.timestamp = event.time
+		temp_ev.timestamp = i64(event.time * 1000)
 		temp_ev.thread_id = event.tid
 		temp_ev.process_id = event.pid
 		
@@ -111,6 +111,8 @@ ms_parse :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size: i6
 	ev := Event{}
 	p := &trace.parser
 
+	trace.stamp_scale /= 1000
+
 	last_read: i64 = 0
 	full_chunk := chunk_buffer[:read_size]
 	load_loop: for p.pos < trace.total_size {
@@ -145,7 +147,7 @@ ms_parse :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size: i6
 			ev.args = temp_ev.args
 			ev.duration = -1
 			ev.self_time = 0
-			ev.timestamp = temp_ev.timestamp * trace.stamp_scale
+			ev.timestamp = temp_ev.timestamp
 
 			p_idx, t_idx, e_idx, ok := ms_push_event(trace, temp_ev.process_id, temp_ev.thread_id, &ev)
 			if !ok {
@@ -173,7 +175,7 @@ ms_parse :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size: i6
 
 				depth := &thread.depths[thread.current_depth]
 				jev := &depth.events[jev_idx]
-				jev.duration = (temp_ev.timestamp * trace.stamp_scale) - jev.timestamp
+				jev.duration = temp_ev.timestamp - jev.timestamp
 				jev.self_time = jev.duration - jev.self_time
 				thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
 				trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)

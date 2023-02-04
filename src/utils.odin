@@ -321,3 +321,11 @@ trunc_string :: proc(str: string, pad, max_width: f64) -> string {
 
 	return chopped_str
 }
+
+ticks_to_time :: #force_inline proc(trace: ^Trace, ticks: i64) -> f64 {
+	return f64(ticks) * trace.stamp_scale
+}
+
+time_to_ticks :: #force_inline proc(trace: ^Trace, ts: f64) -> i64 {
+	return i64(ts / trace.stamp_scale)
+}

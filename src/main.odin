@@ -63,7 +63,7 @@ stat_sort_type := SortState.SelfTime
 stat_sort_descending := true
 resort_stats := false
 cur_stat_offset := StatOffset{}
-total_tracked_time := 0.0
+total_tracked_time : i64 = 0
 
 // drawing state
 colormode      := ColorMode.Dark
@@ -117,28 +117,12 @@ idx_pos := [?]glm.vec2{
 	{1.0, 1.0},
 }
 
-to_world_x :: proc(cam: Camera, x: f64) -> f64 {
-	return (x - cam.pan.x) / cam.current_scale
-}
-to_world_y :: proc(cam: Camera, y: f64) -> f64 {
-	return y + cam.pan.y
-}
-to_world_pos :: proc(cam: Camera, pos: Vec2) -> Vec2 {
-	return Vec2{to_world_x(cam, pos.x), to_world_y(cam, pos.y)}
-}
-
-get_current_window :: proc(cam: Camera, ui_state: ^UIState) -> (f64, f64) {
-	display_range_start := to_world_x(cam, 0)
-	display_range_end   := to_world_x(cam, ui_state.full_flamegraph_rect.w)
-	return display_range_start, display_range_end
-}
-
 reset_flamegraph_camera :: proc(trace: ^Trace, ui_state: ^UIState) {
 	cam = Camera{Vec2{0, 0}, Vec2{0, 0}, 0, 1, 1}
 	if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 1000 }
 
 	start_time: f64 = 0
-	end_time  := trace.total_max_time - trace.total_min_time
+	end_time  := ticks_to_time(trace, trace.total_max_time - trace.total_min_time)
 
 	side_pad  := 2 * em
 

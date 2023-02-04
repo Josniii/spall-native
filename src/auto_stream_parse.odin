@@ -52,12 +52,11 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			name = in_get(&trace.intern, &trace.string_block, string(tmp_buf[:len(name_str)+2]))
 		}
 
-		timestamp := f64((event.time_and_type << 8) >> 8)
-		scaled_stamp := timestamp * trace.stamp_scale
+		timestamp := i64((event.time_and_type << 8) >> 8)
 		ev := Event{
 			name = name,
 			duration = -1,
-			timestamp = scaled_stamp,
+			timestamp = timestamp,
 		}
 
 		if thread.max_time > ev.timestamp {
@@ -99,7 +98,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
 		event := (^spall.MicroEnd_Event)(raw_data(data_start))
 
-		timestamp := f64((event.time_and_type << 8) >> 8)
+		timestamp := i64((event.time_and_type << 8) >> 8)
 
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
@@ -107,7 +106,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
 			depth := &thread.depths[thread.current_depth]
 			jev := &depth.events[jev_idx]
-			jev.duration = (timestamp * trace.stamp_scale) - jev.timestamp
+			jev.duration = timestamp - jev.timestamp
 			jev.self_time = jev.duration - jev.self_time
 			thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
 			trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
