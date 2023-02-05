@@ -205,6 +205,7 @@ threaded_config_load :: proc(data: rawptr) {
 	post_loading = true
 }
 
+terminal_mode := true
 main :: proc() {
 
 	// If the user passed us a trace, save off the filename now
@@ -213,6 +214,25 @@ main :: proc() {
 	}
 
 	trace := new(Trace)
+	if terminal_mode {
+		if start_trace == "" {
+			return
+		}
+
+		free_trace(trace)
+		trace^ = Trace{}
+		loading_config = true
+
+		state := new(ThreadState)
+		state^ = ThreadState{
+			filename = start_trace,
+			trace = trace,
+		}
+		start_trace = ""
+		threaded_config_load(state)
+
+		return
+	}
 
 	orig_window_width: i32 = 1280
 	orig_window_height: i32 = 720

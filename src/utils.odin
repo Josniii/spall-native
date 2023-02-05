@@ -18,6 +18,8 @@ panic :: proc(fmt_in: string, args: ..any) -> ! {
 	intrinsics.trap()
 }
 post_error :: proc(trace: ^Trace, fmt_in: string, args: ..any) {
+	fmt.eprintf(fmt_in, ..args)
+	fmt.eprintf("\n")
 	trace.error_message = fmt.bprintf(trace.error_storage[:], fmt_in, ..args)
 }
 
