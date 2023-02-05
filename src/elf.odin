@@ -1,17 +1,16 @@
 package main
 
 import "core:fmt"
-import "core:mem"
-import "core:strings"
 import "core:intrinsics"
 import "core:slice"
-import "core:runtime"
 
 /*
 Handy References:
 - https://refspecs.linuxbase.org/elf/elf.pdf
 - http://man7.org/linux/man-pages/man5/elf.5.html
 */
+
+ELF_MAGIC     := []u8{ 0x7f, 'E', 'L', 'F' }
 
 ELFCLASS32  :: 1
 ELFCLASS64  :: 2

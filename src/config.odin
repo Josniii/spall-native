@@ -3,6 +3,7 @@ package main
 import "core:os"
 import "core:fmt"
 import "core:slice"
+import "core:bytes"
 import "core:time"
 import "core:runtime"
 import "core:path/filepath"
@@ -355,6 +356,49 @@ generate_selftimes :: proc(trace: ^Trace) {
 
 pid_sort_proc :: proc(a, b: Process) -> bool { return a.min_time < b.min_time }
 tid_sort_proc :: proc(a, b: Thread) -> bool  { return a.min_time < b.min_time }
+
+load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
+	fmt.printf("Loading symbols from %s\n", file_name)
+
+	exec_buffer, ok := os.read_entire_file_from_filename(file_name)
+	if !ok {
+		post_error(trace, "Failed to load %s!", file_name)
+		return false
+	}
+	if len(exec_buffer) < 4 {
+		post_error(trace, "Invalid executable file!")
+		return false
+	}
+
+	magic_chunk := (^u32)(raw_data(exec_buffer[:4]))^
+	if bytes.equal(exec_buffer[:4], ELF_MAGIC) {
+		ok := load_elf(trace, exec_buffer)
+		if !ok {
+			post_error(trace, "Failed to parse ELF!")
+			return false
+		}
+	} else if magic_chunk == MACH_MAGIC_64 {
+		ok := load_macho(trace, exec_buffer)
+		if !ok {
+			post_error(trace, "Failed to parse Mach-O!")
+			return false
+		}
+	} else if bytes.equal(exec_buffer[:2], DOS_MAGIC) {
+		ok := load_pe32(trace, exec_buffer)
+		if !ok {
+			post_error(trace, "Failed to parse PE32!")
+			return false
+		}
+	} else {
+		post_error(trace, "Unsupported executable type! %x", exec_buffer[:4])
+		return false
+	}
+
+	fmt.printf("Loaded %d symbols!\n", len(trace.addr_map.entries))
+
+	return true
+}
+
 load_file :: proc(trace: ^Trace, file_name: string) {
 	start_time := time.tick_now()
 
