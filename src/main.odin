@@ -244,8 +244,19 @@ main :: proc() {
 	pointer_cursor = SDL.CreateSystemCursor(.HAND)
 
 	gl_context := SDL.GL_CreateContext(window)
+	if gl_context == nil {
+		fmt.eprintln("Failed to create gl context!")
+		return
+	}
+
 	gl.load_up_to(GL_VERSION_MAJOR, GL_VERSION_MINOR, SDL.gl_set_proc_address)
 	SDL.GL_SetSwapInterval(-1)
+
+	version_str := gl.GetString(gl.VERSION)
+	if version_str == "1.1.0" {
+		fmt.eprintf("GL version is too old! Got %s, needs at least %d.%d.0\n", version_str, GL_VERSION_MAJOR, GL_VERSION_MINOR)
+		return
+	}
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
