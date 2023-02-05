@@ -41,7 +41,7 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		return false
 	}
 
-	header := (^Mach_Header_64)(raw_data(exec_buffer[:size_of(Mach_Header_64)]))
+	header := slice_to_type(exec_buffer, Mach_Header_64) or_return
 	if header.file_type != 2 {
 		return false
 	}
@@ -51,13 +51,13 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	read_idx := size_of(Mach_Header_64)
 	for read_idx < len(exec_buffer) {
 		current_buffer := exec_buffer[read_idx:]
-		cmd := (^Mach_Load_Command)(raw_data(current_buffer[:size_of(Mach_Load_Command)]))
+		cmd := slice_to_type(exec_buffer[read_idx:], Mach_Load_Command) or_return
 		if cmd.size == 0 {
 			return false
 		}
 
 		if cmd.type == MACH_CMD_SYMTAB {
-			symtab_header = (^Mach_Symtab_Command)(raw_data(current_buffer[:size_of(Mach_Symtab_Command)]))^
+			symtab_header = slice_to_type(exec_buffer[read_idx:], Mach_Symtab_Command) or_return
 			break
 		} 
 
@@ -78,7 +78,7 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	string_table_bytes := exec_buffer[symtab_header.string_table_offset:]
 	for i := 0; i < int(symtab_header.symbol_count); i += 1 {
 		symbol_buffer := exec_buffer[int(symtab_header.symbol_table_offset)+(i * size_of(Mach_Symbol_Entry_64)):]
-		symbol := (^Mach_Symbol_Entry_64)(raw_data(symbol_buffer[:size_of(Mach_Symbol_Entry_64)]))
+		symbol := slice_to_type(symbol_buffer, Mach_Symbol_Entry_64) or_return
 		symbol_name := string(cstring(raw_data(string_table_bytes[symbol.string_table_idx:])))
 
 		if symbol_name == "_spall_auto_init" {
@@ -89,7 +89,7 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 
 	for i := 0; i < int(symtab_header.symbol_count); i += 1 {
 		symbol_buffer := exec_buffer[int(symtab_header.symbol_table_offset)+(i * size_of(Mach_Symbol_Entry_64)):]
-		symbol := (^Mach_Symbol_Entry_64)(raw_data(symbol_buffer[:size_of(Mach_Symbol_Entry_64)]))
+		symbol := slice_to_type(symbol_buffer, Mach_Symbol_Entry_64) or_return
 		symbol_name := string(cstring(raw_data(string_table_bytes[symbol.string_table_idx:])))
 
 		if symbol.value != 0 {

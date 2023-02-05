@@ -365,6 +365,8 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 		post_error(trace, "Failed to load %s!", file_name)
 		return false
 	}
+	defer delete(exec_buffer)
+
 	if len(exec_buffer) < 4 {
 		post_error(trace, "Invalid executable file!")
 		return false

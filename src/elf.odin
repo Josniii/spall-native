@@ -2,7 +2,6 @@ package main
 
 import "core:fmt"
 import "core:intrinsics"
-import "core:slice"
 
 /*
 Handy References:
@@ -416,14 +415,6 @@ ELF_Context :: struct {
 	target_abi: Target_ABI,
 	file_type: File_Type,
 	isa: Processor_Type,
-}
-
-slice_to_type :: proc(buf: []u8, $T: typeid) -> (T, bool) #optional_ok {
-    if len(buf) < size_of(T) {
-        return {}, false
-    }
-
-    return intrinsics.unaligned_load((^T)(raw_data(buf))), true
 }
 
 fe_to_ne :: #force_inline proc(is_little_endian: bool, value: $T) -> T where intrinsics.type_is_integer(T) {

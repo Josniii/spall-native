@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:bytes"
 
 DOS_MAGIC     := []u8{ 0x4d, 0x5a }
@@ -95,10 +96,10 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	pdb_path := ""
 	{
 		dos_end_offset := 0x3c
-		pe_hdr_offset := (^u32)(raw_data(exec_buffer[dos_end_offset:dos_end_offset+4]))^
+		pe_hdr_offset := slice_to_type(exec_buffer[dos_end_offset:], u32) or_return
 
 		cur_offset := int(pe_hdr_offset)
-		pe_hdr := (^PE32_Header)(raw_data(exec_buffer[cur_offset:cur_offset+size_of(PE32_Header)]))
+		pe_hdr := slice_to_type(exec_buffer[cur_offset:], PE32_Header) or_return
 
 		if !bytes.equal(pe_hdr.magic[:], PE32_MAGIC) {
 			return false
@@ -111,7 +112,7 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		debug_rva := pe_hdr.optional_header.data_directories[6].virtual_addr
 		for i := 0; i < int(pe_hdr.coff_header.section_count); i += 1 {
 			section_offset := i * size_of(COFF_Section_Header)
-			section_hdr := (^COFF_Section_Header)(raw_data(exec_buffer[cur_offset+section_offset:cur_offset+section_offset+size_of(COFF_Section_Header)]))
+			section_hdr := slice_to_type(exec_buffer[cur_offset+section_offset:], COFF_Section_Header) or_return
 
 			start := section_hdr.virtual_addr
 			end   := start + section_hdr.virtual_size
@@ -121,7 +122,7 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 
 			section_relative_offset := debug_rva - start
 			dir_offset := section_hdr.raw_data_offset + section_relative_offset
-			debug_dir := (^COFF_Debug_Directory)(raw_data(exec_buffer[dir_offset:dir_offset+size_of(COFF_Debug_Directory)]))
+			debug_dir := slice_to_type(exec_buffer[dir_offset:], COFF_Debug_Directory) or_return
 			if debug_dir.type != DEBUG_TYPE_CODEVIEW {
 				break
 			}
@@ -139,12 +140,15 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	}
 
 	fmt.printf("PDB is at %s\n", pdb_path)
-
 	{
-		
+		pdb_buffer, ok := os.read_entire_file_from_filename(pdb_path)
+		if !ok {
+			return false
+		}
+		defer delete(pdb_buffer)
+
+
 	}
-
-
 
 	return false
 }

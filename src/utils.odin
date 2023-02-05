@@ -320,3 +320,11 @@ trunc_string :: proc(str: string, pad, max_width: f64) -> string {
 
 	return chopped_str
 }
+
+slice_to_type :: proc(buf: []u8, $T: typeid) -> (T, bool) #optional_ok {
+    if len(buf) < size_of(T) {
+        return {}, false
+    }
+
+    return intrinsics.unaligned_load((^T)(raw_data(buf))), true
+}
