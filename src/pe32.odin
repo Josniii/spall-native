@@ -312,6 +312,11 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 
 		mod_offset = i_round_up(mod_offset, 4)
 
+		// Skip over modules with no symbols
+		if mod_info_hdr.module_symbol_stream == max(u16) {
+			continue
+		}
+
 		symbol_offset_stream_offset := stream_block_offsets[mod_info_hdr.module_symbol_stream]
 		symbol_stream_size := stream_sizes[mod_info_hdr.module_symbol_stream]
 		symbol_offset_stream := stream_blocks[symbol_offset_stream_offset:]
