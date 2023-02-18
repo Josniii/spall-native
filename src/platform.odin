@@ -9,6 +9,10 @@ import SDL "vendor:sdl2"
 import SDL_TTF "vendor:sdl2/ttf"
 import gl "vendor:OpenGL"
 
+when ODIN_OS == .Darwin {
+	import NS "vendor:darwin/Foundation"
+}
+
 draw_rect :: proc(rects: ^[dynamic]DrawRect, rect: Rect, color: BVec4) {
 	append(rects, DrawRect{FVec4{f32(rect.x), f32(rect.y), f32(rect.w), f32(rect.h)}, color, FVec2{-2, 0.0}})
 }
@@ -182,7 +186,29 @@ flush_rects :: proc(rects: ^[dynamic]DrawRect) {
 	resize(rects, 0)
 }
 
-open_file_dialog :: proc() {}
+open_file_dialog :: proc() -> (string, bool) {
+	when ODIN_OS == .Darwin {
+		panel := NS.OpenPanel.openPanel()
+		panel->setCanChooseFiles(true)
+		panel->setResolvesAliases(true)
+		panel->setCanChooseDirectories(false)
+		panel->setAllowsMultipleSelection(false)
+
+		if panel->runModal() == .OK {
+			urls := panel->URLs()
+			ret_count := urls->count()
+			if ret_count != 1 {
+				return "", false
+			}
+
+			url := urls->objectAs(0, ^NS.URL)
+			return strings.clone_from_cstring(url->fileSystemRepresentation()), true
+		}
+	}
+
+	return "", false
+}
+
 get_system_color :: proc() -> bool { return false }
 get_session_storage :: proc(key: string) { }
 set_session_storage :: proc(key, val: string) { }

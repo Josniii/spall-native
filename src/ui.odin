@@ -304,7 +304,11 @@ draw_header :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState
 
 		// Open File
 		if button(rects, Rect{cursor_x, (header_rect.h / 2) - (button_height / 2), button_width, button_height}, "\uf07c", "open file", .IconFont, 0, ui_state.width) {
-			open_file_dialog()
+			filename, ok := open_file_dialog()
+			if ok {
+				start_trace = filename
+				load_config(&global_pool, trace)
+			}
 		}
 		cursor_x += button_width + button_pad
 
