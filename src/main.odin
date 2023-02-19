@@ -706,6 +706,7 @@ main :: proc() {
 			awake = false
 		} else {
 			was_sleeping = false
+			awake = true
 		}
 
 		gl.Finish()

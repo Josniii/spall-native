@@ -2,6 +2,7 @@
 
 package main
 
+import "core:strings"
 import NS "vendor:darwin/Foundation"
 
 open_file_dialog :: proc() -> (string, bool) {
