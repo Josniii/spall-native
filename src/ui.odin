@@ -1198,11 +1198,17 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 	draw_line(rects, Vec2{0, info_pane_rect.y}, Vec2{ui_state.width, info_pane_rect.y}, 1, line_color)
 	draw_rect(rects, info_pane_rect, bg_color) // bottom
 
+	tab_select_height := em + (em / 2)
+	pane_start_y := info_pane_rect.y + tab_select_height
+	pane_gapped_start_y := pane_start_y + ui_state.top_line_gap
+	draw_rect(rects, Rect{0, info_pane_rect.y, ui_state.width, tab_select_height}, tabbar_color)
+	draw_line(rects, Vec2{0, pane_start_y}, Vec2{ui_state.width, pane_start_y}, 1, line_color)
+
 	x_subpad := em
 
 	// If the user selected a single rectangle
 	if selected_event.pid != -1 && selected_event.tid != -1 && selected_event.did != -1 && selected_event.eid != -1 {
-		y := info_pane_rect.y + ui_state.top_line_gap
+		y := pane_gapped_start_y
 
 		p_idx := int(selected_event.pid)
 		t_idx := int(selected_event.tid)
@@ -1223,7 +1229,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 
 		// If we've got stats cooking already
 	} else if stats_state == .Pass1 || stats_state == .Pass2 {
-		y := info_pane_rect.y + ui_state.top_line_gap
+		y := pane_gapped_start_y
 		center_x := ui_state.width / 2
 
 		total_count := 0
@@ -1263,7 +1269,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 
 		// If stats are ready to display
 	} else if stats_state == .Finished && did_multiselect {
-		y := info_pane_rect.y + ui_state.top_line_gap
+		y := pane_gapped_start_y
 
 		header_start := y
 		header_height := 2 * em
@@ -1280,7 +1286,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 
 		full_time := f64(trace.total_max_time - trace.total_min_time)
 
-		y += header_height + (em / 4)
+		y += header_height + (em / 2)
 
 		displayed_lines := info_line_count - 1
 		if displayed_lines < len(trace.stats.entries) {
@@ -1291,7 +1297,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 			next_line(&tmp, em)
 			line_height := tmp - y
 
-			max_scroll := (f64(max_lines - displayed_lines) * line_height) + (em / 4)
+			max_scroll := (f64(max_lines - displayed_lines) * line_height) + em
 			info_pane_scroll = max(info_pane_scroll, -max_scroll)
 			y += info_pane_scroll
 		}
@@ -1304,7 +1310,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 			stat := entry.val
 
 			stat_idx += 1
-			if y < (info_pane_rect.y + (em / 2)) {
+			if y < (pane_gapped_start_y + (em / 2)) {
 				next_line(&y, em)
 				continue stat_loop
 			}
@@ -1394,8 +1400,9 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 		y = header_start
 		cursor = 0
 
-		draw_rect(rects, Rect{0, info_pane_rect.y, ui_state.width, 2 * em}, subbar_color)
-		draw_line(rects, Vec2{0, info_pane_rect.y + (2 * em)}, Vec2{ui_state.width, info_pane_rect.y + (2 * em)}, 1, line_color)
+		table_header_height := 2 * em
+		draw_rect(rects, Rect{0, pane_start_y, ui_state.width, table_header_height + ui_state.top_line_gap}, subbar_color)
+		draw_line(rects, Vec2{0, pane_start_y}, Vec2{ui_state.width, pane_start_y}, 1, line_color)
 
 		column_header :: proc(rects: ^[dynamic]DrawRect, cursor: ^f64, column_gap, text_y, rect_y, pane_h: f64, text: string, sort_type: SortState) {
 			start_x := cursor^
@@ -1432,22 +1439,22 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 		}
 
 		self_header_text   := fmt.tprintf("%-10s", "   self")
-		column_header(rects, &cursor, column_gap, y, info_pane_rect.y, info_pane_rect.h, self_header_text, .SelfTime)
+		column_header(rects, &cursor, column_gap, y, pane_start_y, info_pane_rect.h, self_header_text, .SelfTime)
 
 		total_header_text  := fmt.tprintf("%-17s", "      total")
-		column_header(rects, &cursor, column_gap, y, info_pane_rect.y, info_pane_rect.h, total_header_text, .TotalTime)
+		column_header(rects, &cursor, column_gap, y, pane_start_y, info_pane_rect.h, total_header_text, .TotalTime)
 
 		min_header_text    := fmt.tprintf("%-10s", "   min.")
-		column_header(rects, &cursor, column_gap, y, info_pane_rect.y, info_pane_rect.h, min_header_text, .MinTime)
+		column_header(rects, &cursor, column_gap, y, pane_start_y, info_pane_rect.h, min_header_text, .MinTime)
 
 		avg_header_text    := fmt.tprintf("%-10s", "   avg.")
-		column_header(rects, &cursor, column_gap, y, info_pane_rect.y, info_pane_rect.h, avg_header_text, .AvgTime)
+		column_header(rects, &cursor, column_gap, y, pane_start_y, info_pane_rect.h, avg_header_text, .AvgTime)
 
 		max_header_text    := fmt.tprintf("%-10s", "   max.")
-		column_header(rects, &cursor, column_gap, y, info_pane_rect.y, info_pane_rect.h, max_header_text, .MaxTime)
+		column_header(rects, &cursor, column_gap, y, pane_start_y, info_pane_rect.h, max_header_text, .MaxTime)
 
 		max_count_text    := fmt.tprintf("%-10s", "   count")
-		column_header(rects, &cursor, column_gap, y, info_pane_rect.y, info_pane_rect.h, max_count_text, .Count)
+		column_header(rects, &cursor, column_gap, y, pane_start_y, info_pane_rect.h, max_count_text, .Count)
 
 		name_header_text   := fmt.tprintf("%-10s", "   name")
 		text_outf(rects, &cursor, y, name_header_text, text_color)

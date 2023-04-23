@@ -607,7 +607,7 @@ main :: proc() {
 		top_line_gap    := (em / 1.5)
 
 		info_pane_height : f64 = 0
-		info_line_count := 7
+		info_line_count := 8
 		for i := 0; i < info_line_count; i += 1 {
 			next_line(&info_pane_height, em)
 		}

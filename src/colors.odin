@@ -22,6 +22,7 @@ toolbar_color := BVec4{}
 toolbar_button_color  := BVec4{}
 toolbar_text_color := BVec4{}
 loading_block_color := BVec4{}
+tabbar_color := BVec4{}
 
 graph_color   := BVec4{}
 highlight_color := BVec4{}
@@ -29,6 +30,7 @@ shadow_color := BVec4{}
 wide_rect_color := BVec4{}
 wide_bg_color := BVec4{}
 rect_tooltip_stats_color := BVec4{}
+test_color := BVec4{}
 
 ColorMode :: enum {
 	Dark,
@@ -40,6 +42,7 @@ default_colors :: proc "contextless" (is_dark: bool) {
 	loading_block_color  = BVec4{100, 194, 236, 255}
 
 	error_color = BVec4{0xFF, 0x3F, 0x83, 255}
+	test_color = BVec4{255, 10, 10, 255}
 
 	if is_dark {
 		bg_color         = BVec4{15,   15,  15, 255}
@@ -55,6 +58,7 @@ default_colors :: proc "contextless" (is_dark: bool) {
 		toolbar_button_color = BVec4{40, 40, 40, 255}
 		toolbar_color        = BVec4{0x00, 0x83, 0xb7, 255}
 		toolbar_text_color   = BVec4{0xF5, 0xF5, 0xF5, 255}
+		tabbar_color         = BVec4{0x3A, 0x3A, 0x3A, 255}
 
 		graph_color      = BVec4{180, 180, 180, 255}
 		highlight_color  = BVec4{ 64,  64, 255,   7}
@@ -78,6 +82,7 @@ default_colors :: proc "contextless" (is_dark: bool) {
 
 		subbar_color         = BVec4{235, 230, 225, 255}
 		subbar_split_color   = BVec4{150, 150, 150, 255}
+		tabbar_color         = BVec4{220, 215, 210, 255}
 		toolbar_button_color = BVec4{40, 40, 40, 255}
 		toolbar_color        = BVec4{0x00, 0x83, 0xb7, 255}
 		toolbar_text_color   = BVec4{0xF5, 0xF5, 0xF5, 255}
