@@ -31,6 +31,7 @@ wide_rect_color := BVec4{}
 wide_bg_color := BVec4{}
 rect_tooltip_stats_color := BVec4{}
 test_color := BVec4{}
+grip_color := BVec4{}
 
 ColorMode :: enum {
 	Dark,
@@ -44,6 +45,7 @@ default_colors :: proc "contextless" (is_dark: bool) {
 	error_color = BVec4{0xFF, 0x3F, 0x83, 255}
 	test_color = BVec4{255, 10, 10, 255}
 
+	// dark mode
 	if is_dark {
 		bg_color         = BVec4{15,   15,  15, 255}
 		bg_color2        = BVec4{0,     0,   0, 255}
@@ -69,8 +71,11 @@ default_colors :: proc "contextless" (is_dark: bool) {
 		subdivision_color = BVec4{ 30,  30, 30, 255}
 		division_color    = BVec4{100, 100, 100, 255}
 		xbar_color        = BVec4{180, 180, 180, 255}
+		grip_color        = BVec4{40, 40, 40, 255}
 
 		rect_tooltip_stats_color = BVec4{80, 255, 80, 255}
+
+	// light mode
 	} else {
 		bg_color         = BVec4{254, 252, 248, 255}
 		bg_color2        = BVec4{255, 255, 255, 255}
@@ -96,6 +101,7 @@ default_colors :: proc "contextless" (is_dark: bool) {
 		subdivision_color = BVec4{230, 230, 230, 255}
 		division_color    = BVec4{180, 180, 180, 255}
 		xbar_color        = BVec4{ 80,  80,  80, 255}
+		grip_color        = BVec4{180, 175, 170, 255}
 
 		rect_tooltip_stats_color = BVec4{20, 60, 20, 255}
 	}

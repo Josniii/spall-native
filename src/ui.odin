@@ -1207,13 +1207,14 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool,
 	draw_rect(rects, tab_rect, tabbar_color)
 	draw_line(rects, Vec2{0, pane_start_y}, Vec2{ui_state.width, pane_start_y}, 1, line_color)
 
+	// draw pane grip
 	handle_text := "\uf00a"
 	handle_y := info_pane_rect.y + ((tab_select_height / 2) - (h2_height / 2))
 	handle_width := measure_text(handle_text, .H2Size, .IconFont)
 
 	handle_pad := (em / 2)
 	tab_handle_rect := Rect{0, info_pane_rect.y, (2 * handle_pad) + handle_width, tab_select_height}
-	draw_rect(rects, tab_handle_rect, toolbar_button_color)
+	draw_rect(rects, tab_handle_rect, grip_color)
 	draw_text(rects, handle_text, Vec2{handle_pad, handle_y}, .H2Size, .IconFont, toolbar_text_color)
 
 	tab_bar_x := (2 * handle_pad) + handle_width
