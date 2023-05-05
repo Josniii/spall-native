@@ -48,7 +48,6 @@ selected_event := EventID{-1, -1, -1, -1}
 pressed_event := EventID{-1, -1, -1, -1}
 released_event := EventID{-1, -1, -1, -1}
 
-did_multiselect := false
 clicked_on_rect := false
 
 // tooltip-state
@@ -58,12 +57,14 @@ rendered_rect_tooltip := false
 
 did_pan := false
 
+stats_just_started := false
 stats_state := StatState.NoStats
 stat_sort_type := SortState.SelfTime
 stat_sort_descending := true
 resort_stats := false
 cur_stat_offset := StatOffset{}
 total_tracked_time : i64 = 0
+stats_options_open := false
 
 // drawing state
 colormode      := ColorMode.Dark
@@ -97,7 +98,6 @@ t               : f64
 multiselect_t   : f64
 greyanim_t      : f32
 greymotion      : f32
-anim_playing    : bool
 frame_count     : int
 last_frame_count: int
 rect_count      : int
@@ -398,6 +398,7 @@ main :: proc() {
 			was_mouse_down = false
 			mouse_up_now = false
 			released_event = {-1, -1, -1, -1}
+			ui_state.render_one_more = false
 			frame_count += 1
 			free_all(context.temp_allocator)
 		}
@@ -672,8 +673,11 @@ main :: proc() {
 		draw_line(&rects, Vec2{ui_state.side_pad, header_height + timebar_height},       Vec2{ui_state.side_pad, ui_state.info_pane_rect.y}, 1, line_color)
 		draw_line(&rects, Vec2{ui_state.minimap_rect.x, header_height + timebar_height}, Vec2{ui_state.minimap_rect.x, ui_state.info_pane_rect.y}, 1, line_color)
 
-		just_started, render_one_more := process_multiselect(&rects, trace, pan_delta, dt, &ui_state)
-		draw_stats(&rects, trace, just_started, &ui_state)
+		process_multiselect(&rects, trace, pan_delta, dt, &ui_state)
+		process_stats(trace, &ui_state)
+
+		draw_stats(&rects, trace, &ui_state)
+		stats_just_started = false
 		if resort_stats {
 			sort_stats(trace)
 			resort_stats = false
@@ -703,7 +707,7 @@ main :: proc() {
 		flush_rects(&rects)
 
 		// save me my battery, plz
-		if should_sleep(&cam, info_pane_scroll_vel, stats_state, anim_playing, render_one_more) {
+		if should_sleep(&cam, info_pane_scroll_vel, &ui_state) {
 			cam.pan.x = cam.target_pan_x
 			cam.vel.y = 0
 			cam.current_scale = cam.target_scale
@@ -718,4 +722,18 @@ main :: proc() {
 		SDL.GL_SwapWindow(window)
 		gl.Finish()
 	}
+}
+
+should_sleep :: proc(cam: ^Camera, info_pane_scroll_vel: f64, ui_state: ^UIState) -> bool {
+	PAN_X_EPSILON :: 0.01
+	PAN_Y_EPSILON :: 1.0
+	SCALE_EPSILON :: 0.01
+	SCROLL_EPSILON :: 0.01
+
+	panning_x := math.abs(cam.pan.x - cam.target_pan_x) > PAN_X_EPSILON
+	panning_y := math.abs(cam.vel.y - 0) > PAN_Y_EPSILON
+	scaling   := math.abs((cam.current_scale - cam.target_scale) / cam.target_scale) > SCALE_EPSILON
+	scrolling := math.abs(info_pane_scroll_vel) > SCROLL_EPSILON
+
+	return (!ui_state.render_one_more && !panning_x && !panning_y && !scaling && !scrolling)
 }

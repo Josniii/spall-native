@@ -1,5 +1,7 @@
 package main
 
+import "core:fmt"
+
 Vec2 :: [2]f64
 FVec2 :: [2]f32
 
@@ -34,13 +36,17 @@ UIState :: struct {
 	global_timebar_rect:  Rect,
 	local_timebar_rect:   Rect,
 	info_pane_rect:       Rect,
+	stats_options_rect:   Rect,
 	minimap_rect:         Rect,
 
 	full_flamegraph_rect:   Rect,
 	inner_flamegraph_rect:  Rect,
 	padded_flamegraph_rect: Rect,
 
+	render_one_more: bool,
+	multiselecting: bool,
 	resizing_pane: bool,
+	stats_options_open: bool,
 }
 
 DrawRect :: struct #packed {
@@ -208,6 +214,8 @@ Trace :: struct {
 	selected_ranges: [dynamic]Range,
 	stats: StatMap,
 	global_instants: [dynamic]Instant,
+	stats_start_time: f64,
+	stats_end_time: f64,
 
 	total_max_time: i64,
 	total_min_time: i64,
@@ -248,6 +256,8 @@ Thread :: struct {
 	id: u32,
 	name: u32,
 
+	in_stats: bool,
+
 	events: [dynamic]Event,
 	depths: [dynamic]Depth,
 	instants: [dynamic]Instant,
@@ -259,7 +269,10 @@ Process :: struct {
 	min_time: i64,
 	name: u32,
 
-	process_id: u32,
+	id: u32,
+
+	in_stats: bool,
+
 	threads: [dynamic]Thread,
 	instants: [dynamic]Instant,
 	thread_map: ValHash,
@@ -268,7 +281,8 @@ Process :: struct {
 init_process :: proc(process_id: u32) -> Process {
 	return Process{
 		min_time = max(i64), 
-		process_id = process_id,
+		id = process_id,
+		in_stats = true,
 		thread_map = vh_init(),
 		threads = make([dynamic]Thread),
 		instants = make([dynamic]Instant),
@@ -279,10 +293,19 @@ free_process :: proc(process: ^Process) {
 	delete(process.instants)
 }
 
+get_proc_name :: proc(trace: ^Trace, process: ^Process) -> string {
+	if process.name > 0 {
+		return fmt.tprintf("%s (PID %d)", in_getstr(&trace.string_block, process.name), process.id)
+	} else {
+		return fmt.tprintf("PID: %d", process.id)
+	}
+}
+
 init_thread :: proc(thread_id: u32) -> Thread {
 	t := Thread{
 		min_time = max(i64), 
 		id = thread_id,
+		in_stats = true,
 		events = make([dynamic]Event),
 		depths = make([dynamic]Depth),
 		instants = make([dynamic]Instant),
@@ -298,6 +321,14 @@ free_thread :: proc(thread: ^Thread) {
 	delete(thread.events)
 	delete(thread.depths)
 	delete(thread.instants)
+}
+
+get_thread_name :: proc(trace: ^Trace, thread: ^Thread) -> string {
+	if thread.name > 0 {
+		return fmt.tprintf("%s (TID %d)", in_getstr(&trace.string_block, thread.name), thread.id)
+	} else {
+		return fmt.tprintf("TID: %d", thread.id)
+	}
 }
 
 Stack :: struct($T: typeid) {

@@ -28,7 +28,7 @@ next_line :: proc(y: ^f64, h: f64) -> f64 {
 	y^ += h + (h / 1.5)
 	return res
 }
-prev_line := proc(y: ^f64, h: f64) -> f64 {
+prev_line :: proc(y: ^f64, h: f64) -> f64 {
 	res := y^
 	y^ -= h + (h / 3)
 	return res
@@ -320,24 +320,10 @@ draw_header :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState
 
 		// Process All Events
 		if button(rects, Rect{cursor_x, (header_rect.h / 2) - (button_height / 2), button_width, button_height}, "\uf1fe", "get stats for the whole file", .IconFont, 0, ui_state.width) {
-			stats_state = .Pass1
-			did_multiselect = true
-			total_tracked_time = 0
-			cur_stat_offset = StatOffset{}
-			selected_event = {-1, -1, -1, -1}
-			info_pane_scroll = 0
-			info_pane_scroll_vel = 0
-
-			sm_clear(&trace.stats)
-			resize(&trace.selected_ranges, 0)
-
-			for proc_v, p_idx in trace.processes {
-				for tm, t_idx in proc_v.threads {
-					for depth, d_idx in tm.depths {
-						append(&trace.selected_ranges, Range{p_idx, t_idx, d_idx, 0, len(depth.events)})
-					}
-				}
-			}
+			trace.stats_start_time = f64(trace.total_min_time)
+			trace.stats_end_time = f64(trace.total_max_time)
+			ui_state.multiselecting = true
+			build_selected_ranges(trace)
 		}
 		cursor_x += button_width + button_pad
 
@@ -567,13 +553,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 		h1_size : f64 = 0
 		if len(trace.processes) > 1 {
 			if cur_y > full_flamegraph_rect.y {
-				row_text: string
-				if proc_v.name > 0 {
-					row_text = fmt.tprintf("%s (PID %d)", in_getstr(&trace.string_block, proc_v.name), proc_v.process_id)
-				} else {
-					row_text = fmt.tprintf("PID: %d", proc_v.process_id)
-				}
-				batch_text(text_rects, row_text, Vec2{ui_state.side_pad + 5, cur_y}, .H1Size, .DefaultFont, text_color)
+				batch_text(text_rects, get_proc_name(trace, &proc_v), Vec2{ui_state.side_pad + 5, cur_y}, .H1Size, .DefaultFont, text_color)
 			}
 
 			h1_size = h1_height + (h1_height / 2)
@@ -597,13 +577,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 			}
 
 			if last_cur_y > full_flamegraph_rect.y {
-				row_text: string
-				if thread.name > 0 {
-					row_text = fmt.tprintf("%s (TID %d)", in_getstr(&trace.string_block, thread.name), thread.id)
-				} else {
-					row_text = fmt.tprintf("TID: %d", thread.id)
-				}
-				batch_text(text_rects, row_text, Vec2{ui_state.side_pad + 5, last_cur_y}, .H2Size, .DefaultFont, text_color)
+				batch_text(text_rects, get_thread_name(trace, &thread), Vec2{ui_state.side_pad + 5, last_cur_y}, .H2Size, .DefaultFont, text_color)
 			}
 
 			cur_depth_off := 0
@@ -659,23 +633,15 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 
 						rect_color := cur_node.avg_color
 						grey := greyscale(cur_node.avg_color)
-						should_fade := false
-						if did_multiselect {
-							if found_rid == -1 { should_fade = true } 
-							else {
+						if ui_state.multiselecting {
+							if found_rid != -1 {
 								range := trace.selected_ranges[found_rid]   
-								if !range_in_range(cur_node.event_start_idx, cur_node.event_start_idx+uint(cur_node.event_arr_len), uint(range.start), uint(range.end)) {
-									should_fade = true
+								if !range_in_range(cur_node.event_start_idx, cur_node.event_start_idx+uint(cur_node.event_arr_len), 
+												   uint(range.start), uint(range.end)) {
+									rect_color = grey
 								}
-							}
-						}
-						if should_fade {
-							if multiselect_t != 0 && greyanim_t > 1 {
-								anim_playing = false
-								rect_color = grey
 							} else {
-								st := ease_in_out(greyanim_t)
-								rect_color = math.lerp(rect_color, grey, greymotion)
+								rect_color = grey
 							}
 						}
 
@@ -720,26 +686,18 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 
 							ev_name := in_getstr(&trace.string_block, ev.name)
 							idx := name_color_idx(trace, ev.name)
-							rect_color := trace.color_choices[idx]
 							e_idx := int(cur_node.event_start_idx) + de_id
 
+							rect_color := trace.color_choices[idx]
 							grey := greyscale(trace.color_choices[idx])
-
-							should_fade := false
-							if did_multiselect {
-								if found_rid == -1 { should_fade = true } 
-								else {
+							if ui_state.multiselecting {
+								if found_rid != -1 {
 									range := trace.selected_ranges[found_rid]   
-									if !val_in_range(e_idx, range.start, range.end - 1) { should_fade = true }
-								}
-							}
-
-							if should_fade {
-								if multiselect_t != 0 && greyanim_t > 1 {
-									anim_playing = false
-									rect_color = grey
+									if !val_in_range(e_idx, range.start, range.end - 1) { 
+										rect_color = grey
+									}
 								} else {
-									rect_color = math.lerp(rect_color, grey, greymotion)
+									rect_color = grey
 								}
 							}
 
@@ -1000,23 +958,15 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 
 						rect_color := cur_node.avg_color
 						grey := greyscale(cur_node.avg_color)
-						should_fade := false
-						if did_multiselect {
-							if found_rid == -1 { should_fade = true } 
-							else {
+						if ui_state.multiselecting {
+							if found_rid != -1 {
 								range := trace.selected_ranges[found_rid]   
-								if !range_in_range(cur_node.event_start_idx, cur_node.event_start_idx+uint(cur_node.event_arr_len), uint(range.start), uint(range.end)) {
-									should_fade = true
+								if !range_in_range(cur_node.event_start_idx, cur_node.event_start_idx+uint(cur_node.event_arr_len), 
+												   uint(range.start), uint(range.end)) {
+									rect_color = grey
 								}
-							}
-						}
-						if should_fade {
-							if multiselect_t != 0 && greyanim_t > 1 {
-								anim_playing = false
-								rect_color = grey
 							} else {
-								st := ease_in_out(greyanim_t)
-								rect_color = math.lerp(rect_color, grey, greymotion)
+								rect_color = grey
 							}
 						}
 
@@ -1047,26 +997,18 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 							r_w   := end_x - r_x
 
 							idx := name_color_idx(trace, ev.name)
-							rect_color := trace.color_choices[idx]
 							e_idx := int(cur_node.event_start_idx) + de_id
 
+							rect_color := trace.color_choices[idx]
 							grey := greyscale(trace.color_choices[idx])
-							should_fade := false
-							if did_multiselect {
-								if found_rid == -1 { should_fade = true } 
-								else {
+							if ui_state.multiselecting {
+								if found_rid != -1 {
 									range := trace.selected_ranges[found_rid]   
-									if !val_in_range(e_idx, range.start, range.end - 1) { should_fade = true }
-								}
-							}
-
-							if should_fade {
-								if multiselect_t != 0 && greyanim_t > 1 {
-									anim_playing = false
-									rect_color = grey
+									if !val_in_range(e_idx, range.start, range.end - 1) { 
+										rect_color = grey
+									}
 								} else {
-									st := ease_in_out(greyanim_t)
-									rect_color = math.lerp(rect_color, grey, greymotion)
+									rect_color = grey
 								}
 							}
 
@@ -1176,20 +1118,20 @@ draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, start_time, end_t
 		}
 
 		draw_line(rects, 
-		Vec2{ui_state.side_pad + highlight_start_x, header_rect.h + (global_timebar_rect.h / 2) - (em / 2) + p_height},
-		Vec2{ui_state.side_pad + highlight_start_x, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 2, xbar_color)
+			Vec2{ui_state.side_pad + highlight_start_x, header_rect.h + (global_timebar_rect.h / 2) - (em / 2) + p_height},
+			Vec2{ui_state.side_pad + highlight_start_x, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 2, xbar_color)
 		draw_line(rects, 
-		Vec2{ui_state.side_pad + highlight_end_x, header_rect.h + (global_timebar_rect.h / 2) - (em / 2) + p_height}, 
-		Vec2{ui_state.side_pad + highlight_end_x, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 2, xbar_color)
+			Vec2{ui_state.side_pad + highlight_end_x, header_rect.h + (global_timebar_rect.h / 2) - (em / 2) + p_height}, 
+			Vec2{ui_state.side_pad + highlight_end_x, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 2, xbar_color)
 		draw_line(rects, 
-		Vec2{0, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 
-		Vec2{ui_state.width, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 1, line_color)
+			Vec2{0, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 
+			Vec2{ui_state.width, header_rect.h + global_timebar_rect.h + global_activity_rect.h}, 1, line_color)
 	}
 }
 
 INITIAL_ITER :: 500_000
 FULL_ITER    :: 2_000_000
-draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool, ui_state: ^UIState) {
+draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {
 	full_flamegraph_rect := ui_state.full_flamegraph_rect
 	inner_flamegraph_rect := ui_state.inner_flamegraph_rect
 	info_pane_rect := ui_state.info_pane_rect
@@ -1213,11 +1155,10 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool,
 	handle_width := measure_text(handle_text, .H2Size, .IconFont)
 
 	handle_pad := (em / 2)
-	tab_handle_rect := Rect{0, info_pane_rect.y, (2 * handle_pad) + handle_width, tab_select_height}
+	tab_bar_x := (2 * handle_pad) + handle_width
+	tab_handle_rect := Rect{0, info_pane_rect.y, tab_bar_x, tab_select_height}
 	draw_rect(rects, tab_handle_rect, grip_color)
 	draw_text(rects, handle_text, Vec2{handle_pad, handle_y}, .H2Size, .IconFont, toolbar_text_color)
-
-	tab_bar_x := (2 * handle_pad) + handle_width
 
 	if pt_in_rect(mouse_pos, tab_handle_rect) || ui_state.resizing_pane {
 		set_cursor("pointer")
@@ -1234,6 +1175,84 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool,
 		ui_state.resizing_pane = false
 	}
 
+	tab_bar_x += handle_pad
+	hamburger_text := "\uf142"
+	hamburger_width := measure_text(hamburger_text, .H2Size, .IconFont)
+	draw_text(rects, hamburger_text, Vec2{tab_bar_x, handle_y}, .H2Size, .IconFont, toolbar_text_color)
+	tab_hamburger_rect := Rect{tab_bar_x, handle_y, hamburger_width, h2_height}
+	if pt_in_rect(mouse_pos, tab_hamburger_rect) {
+		set_cursor("pointer")
+	}
+	if clicked && pt_in_rect(clicked_pos, tab_hamburger_rect) {
+		ui_state.stats_options_open = !ui_state.stats_options_open
+	}
+
+	options_pane_height := 15 * em
+	options_pane_width  := 20 * em
+	stats_options_y := info_pane_rect.y - options_pane_height
+	ui_state.stats_options_rect = Rect{tab_bar_x, stats_options_y, options_pane_width, options_pane_height}
+	if ui_state.stats_options_open {
+		draw_rect(rects, ui_state.stats_options_rect, tabbar_color)
+		if pt_in_rect(mouse_pos, ui_state.stats_options_rect) {
+			reset_cursor()
+			is_hovering = false
+			rendered_rect_tooltip = false
+		}
+
+		y_offset := stats_options_y + (em / 2)
+		x_offset := tab_bar_x + (em / 2)
+
+		thread_pad := (em / 2)
+
+		checked_checkbox_text := "\uf14a"
+		unchecked_checkbox_text := "\uf096"
+		checkbox_width := measure_text(checked_checkbox_text, .PSize, .IconFont)
+
+		checkbox_gap := (em / 2)
+		hamburger_width := measure_text(hamburger_text, .H2Size, .IconFont)
+		for proc_v, _ in &trace.processes {
+			checkbox_text := proc_v.in_stats ? checked_checkbox_text : unchecked_checkbox_text
+
+			y := next_line(&y_offset, em)
+			checkbox_rect := Rect{x_offset, y, em, em}
+
+			if pt_in_rect(mouse_pos, checkbox_rect) {
+				set_cursor("pointer")
+			}
+			if clicked && pt_in_rect(clicked_pos, checkbox_rect) {
+				proc_v.in_stats = !proc_v.in_stats
+				build_selected_ranges(trace)
+			}
+
+			draw_text(rects, checkbox_text, Vec2{checkbox_rect.x, checkbox_rect.y}, .PSize, .IconFont, toolbar_text_color)
+			draw_text(rects, get_proc_name(trace, &proc_v), Vec2{x_offset + checkbox_width + checkbox_gap, y - (em / 4)}, .PSize, .DefaultFont, toolbar_text_color)
+			if y_offset >= info_pane_rect.y {
+				break
+			}
+
+			for thread, _ in &proc_v.threads {
+				checkbox_text := thread.in_stats ? checked_checkbox_text : unchecked_checkbox_text
+
+				y := next_line(&y_offset, em)
+
+				checkbox_rect := Rect{x_offset + thread_pad, y, em, em}
+				draw_text(rects, checkbox_text, Vec2{checkbox_rect.x, checkbox_rect.y}, .PSize, .IconFont, toolbar_text_color)
+				draw_text(rects, get_thread_name(trace, &thread), Vec2{x_offset + thread_pad + checkbox_width + checkbox_gap, y - (em / 4)}, .PSize, .DefaultFont, toolbar_text_color)
+
+				if pt_in_rect(mouse_pos, checkbox_rect) {
+					set_cursor("pointer")
+				}
+				if clicked && pt_in_rect(clicked_pos, checkbox_rect) {
+					thread.in_stats = !thread.in_stats
+					build_selected_ranges(trace)
+				}
+
+				if y_offset >= info_pane_rect.y {
+					break
+				}
+			}
+		}
+	}
 
 	x_subpad := em
 
@@ -1277,13 +1296,12 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool,
 			}
 		}
 
-
 		loading_str := "Stats loading..."
 		progress_str := fmt.tprintf("%d of %d", cur_count, total_count)
 		hint_str := "Release multi-select to get the rest of the stats"
 
 		strs := []string{ loading_str, progress_str }
-		if just_started && total_count >= INITIAL_ITER {
+		if stats_just_started && total_count >= INITIAL_ITER {
 			strs = []string{ loading_str, progress_str, hint_str }
 		}
 
@@ -1299,7 +1317,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool,
 		}
 
 		// If stats are ready to display
-	} else if stats_state == .Finished && did_multiselect {
+	} else if stats_state == .Finished && ui_state.multiselecting {
 		y := pane_gapped_start_y
 
 		header_start := y
@@ -1497,18 +1515,22 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool,
 	}
 }
 
-process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta: Vec2, dt: f64, ui_state: ^UIState) -> (just_started, render_one_more: bool) {
+process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta: Vec2, dt: f64, ui_state: ^UIState) {
 	full_flamegraph_rect := ui_state.full_flamegraph_rect
 	inner_flamegraph_rect := ui_state.inner_flamegraph_rect
 	padded_flamegraph_rect := ui_state.padded_flamegraph_rect
 	info_pane_rect := ui_state.info_pane_rect
 
+	if pt_in_rect(clicked_pos, ui_state.stats_options_rect) && ui_state.stats_options_open {
+		return
+	}
+
 	// Handle single-select
 	if mouse_up_now && !did_pan && pt_in_rect(clicked_pos, inner_flamegraph_rect) && pressed_event == released_event && !shift_down {
 		selected_event = released_event
 		clicked_on_rect = true
-		did_multiselect = false
-		render_one_more = true
+		ui_state.multiselecting = false
+		ui_state.render_one_more = true
 	}
 
 	// Handle de-select
@@ -1517,33 +1539,17 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		resize(&trace.selected_ranges, 0)
 
 		multiselect_t = 0
-		did_multiselect = false
+		ui_state.multiselecting = false
 		stats_state = .NoStats
-		render_one_more = true
+		ui_state.render_one_more = true
 	}
 
 	// user wants to multi-select
 	if is_mouse_down && shift_down {
-		if !did_multiselect {
-			multiselect_t = t
-			anim_playing = true
-		}
-
-		// set multiselect flags
-		stats_state = .Pass1
-		did_multiselect = true
-		total_tracked_time = 0
-		cur_stat_offset = StatOffset{}
-		selected_event = {-1, -1, -1, -1}
-		info_pane_scroll = 0
-		info_pane_scroll_vel = 0
-		just_started = true
-
-		// try to fake a reduced frame of latency by extrapolating the position by the delta
-		mouse_pos_extrapolated := mouse_pos + 1 * Vec2{pan_delta.x, pan_delta.y} / dt * min(dt, 0.016)
+		ui_state.multiselecting = true
 
 		// cap multi-select box at graph edges
-		delta := mouse_pos_extrapolated - clicked_pos
+		delta := mouse_pos - clicked_pos
 		c_x := min(clicked_pos.x, inner_flamegraph_rect.x + inner_flamegraph_rect.w)
 		c_x = max(c_x, inner_flamegraph_rect.x)
 
@@ -1577,11 +1583,11 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		flopped_rect.y = selected_rect.y
 		flopped_rect.h = selected_rect.h
 
-		selected_start_time := to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x)
-		selected_end_time   := to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x + flopped_rect.w)
+		trace.stats_start_time = to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x)
+		trace.stats_end_time   = to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x + flopped_rect.w)
 
 		// draw multiselect timerange
-		width_text := measure_fmt(selected_end_time - selected_start_time)
+		width_text := measure_fmt(trace.stats_end_time - trace.stats_start_time)
 		width_text_width := measure_text(width_text, .PSize, .MonoFont) + em
 
 		text_bg_rect  := flopped_rect
@@ -1595,189 +1601,21 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		multiselect_color.w = 180
 		draw_rect(rects, text_bg_rect, multiselect_color)
 		draw_text(rects,
-		width_text, 
-		Vec2{
-			text_bg_rect.x + (em / 2), 
-			text_bg_rect.y + (p_height / 2),
-		}, 
-		.PSize,
-		.MonoFont,
-		BVec4{255, 255, 255, 255},
-	)
+			width_text, 
+			Vec2{
+				text_bg_rect.x + (em / 2), 
+				text_bg_rect.y + (p_height / 2),
+			}, 
+			.PSize,
+			.MonoFont,
+			BVec4{255, 255, 255, 255},
+		)
 
-	// push it into screen-space
-	flopped_rect.x -= full_flamegraph_rect.x
+		// push it into screen-space
+		flopped_rect.x -= full_flamegraph_rect.x
 
-	sm_clear(&trace.stats)
-	resize(&trace.selected_ranges, 0)
-
-	// build out ranges
-	for proc_v, p_idx in trace.processes {
-		for thread, t_idx in proc_v.threads {
-			for depth, d_idx in thread.depths {
-				start_idx := find_idx(trace, depth.events[:], i64(selected_start_time))
-				end_idx := find_idx(trace, depth.events[:], i64(selected_end_time))
-				if start_idx == -1 {
-					start_idx = 0
-				}
-				if end_idx == -1 {
-					end_idx = len(depth.events) - 1
-				}
-				scan_arr := depth.events[start_idx:end_idx+1]
-
-				real_start := -1
-				fwd_scan_loop: for i := 0; i < len(scan_arr); i += 1 {
-					ev := scan_arr[i]
-					x := f64(ev.timestamp - trace.total_min_time)
-
-					duration := f64(bound_duration(&ev, thread.max_time))
-					w := duration * cam.current_scale
-
-					r_x1 := (x * cam.current_scale) + cam.pan.x
-					r_x2 := r_x1 + w
-
-					fl_x1 := flopped_rect.x
-					fl_x2 := flopped_rect.x + flopped_rect.w
-
-					if !range_in_range(r_x1, r_x2, fl_x1, fl_x2) {
-						continue fwd_scan_loop
-					}
-
-					real_start = start_idx + i
-					break fwd_scan_loop
-				}
-
-				real_end := -1
-				rev_scan_loop: for i := len(scan_arr) - 1; i >= 0; i -= 1 {
-					ev := scan_arr[i]
-					x := f64(ev.timestamp - trace.total_min_time)
-
-					duration := f64(bound_duration(&ev, thread.max_time))
-					w := duration * cam.current_scale
-
-					r_x1 := (x * cam.current_scale) + cam.pan.x
-					r_x2 := r_x1 + w
-
-					fl_x1 := flopped_rect.x
-					fl_x2 := flopped_rect.x + flopped_rect.w
-
-					if !range_in_range(r_x1, r_x2, fl_x1, fl_x2) {
-						continue rev_scan_loop
-					}
-
-					real_end = start_idx + i + 1
-					break rev_scan_loop
-				}
-
-				if real_start != -1 && real_end != -1 {
-					append(&trace.selected_ranges, Range{p_idx, t_idx, d_idx, real_start, real_end})
-				}
-			}
-		}
+		build_selected_ranges(trace)
 	}
-}
-
-if (stats_state == .Pass1 || stats_state == .Pass2) && did_multiselect {
-	event_count := 0
-	iter_max := just_started ? INITIAL_ITER : FULL_ITER
-
-	broke_early := false
-	if stats_state == .Pass1 {
-		pass1_range_loop: for range, r_idx in trace.selected_ranges {
-			start_idx := range.start
-			if cur_stat_offset.range_idx > r_idx {
-				continue
-			} else if cur_stat_offset.range_idx == r_idx {
-				start_idx = max(start_idx, cur_stat_offset.event_idx)
-			}
-
-			thread := trace.processes[range.pid].threads[range.tid]
-			events := thread.depths[range.did].events[start_idx:range.end]
-
-			for ev, e_idx in &events {
-				if event_count > iter_max {
-					cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
-					broke_early = true
-					break pass1_range_loop
-				}
-
-				duration := bound_duration(&ev, thread.max_time)
-				name := in_getstr(&trace.string_block, ev.name)
-				s, ok := sm_get(&trace.stats, ev.name)
-				if !ok {
-					s = sm_insert(&trace.stats, ev.name, Stats{min_time = max(i64)})
-				}
-
-				s.count += 1
-				s.total_time += duration
-				s.self_time += ev.self_time
-				s.min_time = min(s.min_time, duration)
-				s.max_time = max(s.max_time, duration)
-				total_tracked_time += duration
-
-				event_count += 1
-			}
-
-		}
-
-		if !broke_early {
-			stats_state = .Pass2
-			cur_stat_offset = StatOffset{}
-		}
-	}
-
-	if stats_state == .Pass2 {
-		pass2_range_loop: for range, r_idx in trace.selected_ranges {
-			start_idx := range.start
-			if cur_stat_offset.range_idx > r_idx {
-				continue
-			} else if cur_stat_offset.range_idx == r_idx {
-				start_idx = max(start_idx, cur_stat_offset.event_idx)
-			}
-
-			thread := trace.processes[range.pid].threads[range.tid]
-			events := thread.depths[range.did].events[start_idx:range.end]
-
-			for ev, e_idx in &events {
-				if event_count > iter_max {
-					cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
-					broke_early = true
-					break pass2_range_loop
-				}
-
-				duration := bound_duration(&ev, thread.max_time)
-				name := in_getstr(&trace.string_block, ev.name)
-				s, ok := sm_get(&trace.stats, ev.name)
-
-				if (s.max_time - s.min_time <= 0) {
-					s.hist[50] += 1
-				} else {
-					t := (duration - s.min_time) / (s.max_time - s.min_time)
-					t = min(1, max(t, 0))
-					t *= 99
-					s.hist[u32(t)] += 1
-				}
-
-				event_count += 1
-			}
-		}
-
-		if !broke_early {
-			for i := 0; i < len(trace.stats.entries); i += 1 {
-				stat := &trace.stats.entries[i].val
-				stat.avg_time = f64(stat.total_time) / f64(stat.count)
-			}
-
-			self_sort :: proc(a, b: StatEntry) -> bool {
-				return a.val.self_time > b.val.self_time
-			}
-			sm_sort(&trace.stats, self_sort)
-			stats_state = .Finished
-		}
-	}
-}
-
-return
 }
 
 sort_stats :: proc(trace: ^Trace) {
@@ -1848,7 +1686,6 @@ process_inputs :: proc(trace: ^Trace, dt: f64, ui_state: ^UIState) -> (i64, i64,
 	pan_delta: Vec2
 
 	if ui_state.resizing_pane {
-		did_pan = true
 		start_time, end_time := get_current_window(trace, cam, ui_state)
 		return start_time, end_time, pan_delta
 	}
@@ -1935,7 +1772,6 @@ process_inputs :: proc(trace: ^Trace, dt: f64, ui_state: ^UIState) -> (i64, i64,
 			last_mouse_pos = mouse_pos
 		}
 
-
 		cam_mouse_x := mouse_pos.x - ui_state.side_pad
 
 		if cam.target_scale != old_scale {
@@ -1976,6 +1812,186 @@ process_inputs :: proc(trace: ^Trace, dt: f64, ui_state: ^UIState) -> (i64, i64,
 	}
 
 	return start_time, end_time, pan_delta
+}
+
+build_selected_ranges :: proc(trace: ^Trace) {
+	init_stat_state(trace)
+
+	// build out ranges
+	for proc_v, p_idx in trace.processes {
+		if !proc_v.in_stats {
+			continue
+		}
+		for thread, t_idx in proc_v.threads {
+			if !thread.in_stats {
+				continue
+			}
+
+			for depth, d_idx in thread.depths {
+				start_idx := find_idx(trace, depth.events[:], i64(trace.stats_start_time))
+				end_idx := find_idx(trace, depth.events[:], i64(trace.stats_end_time))
+				if start_idx == -1 {
+					start_idx = 0
+				}
+				if end_idx == -1 {
+					end_idx = len(depth.events) - 1
+				}
+				scan_arr := depth.events[start_idx:end_idx+1]
+
+				real_start := -1
+				fwd_scan_loop: for i := 0; i < len(scan_arr); i += 1 {
+					ev := scan_arr[i]
+
+					start := f64(ev.timestamp - trace.total_min_time)
+					width := f64(bound_duration(&ev, thread.max_time))
+					if !range_in_range(start, start + width, trace.stats_start_time, trace.stats_end_time) {
+						continue fwd_scan_loop
+					}
+
+					real_start = start_idx + i
+					break fwd_scan_loop
+				}
+
+				real_end := -1
+				rev_scan_loop: for i := len(scan_arr) - 1; i >= 0; i -= 1 {
+					ev := scan_arr[i]
+
+					start := f64(ev.timestamp - trace.total_min_time)
+					width := f64(bound_duration(&ev, thread.max_time))
+					if !range_in_range(start, start + width, trace.stats_start_time, trace.stats_end_time) {
+						continue rev_scan_loop
+					}
+
+					real_end = start_idx + i + 1
+					break rev_scan_loop
+				}
+
+				if real_start != -1 && real_end != -1 {
+					append(&trace.selected_ranges, Range{p_idx, t_idx, d_idx, real_start, real_end})
+				}
+			}
+		}
+	}
+}
+
+init_stat_state :: proc(trace: ^Trace) {
+	stats_state = .Pass1
+	total_tracked_time = 0
+	cur_stat_offset = StatOffset{}
+	selected_event = {-1, -1, -1, -1}
+	info_pane_scroll = 0
+	info_pane_scroll_vel = 0
+	stats_just_started = true
+
+	sm_clear(&trace.stats)
+	resize(&trace.selected_ranges, 0)
+}
+
+process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
+	if stats_state == .Finished {
+		return
+	}
+
+	ui_state.render_one_more = true
+	if (stats_state == .Pass1 || stats_state == .Pass2) {
+		event_count := 0
+		iter_max := stats_just_started ? INITIAL_ITER : FULL_ITER
+
+		broke_early := false
+		if stats_state == .Pass1 {
+			pass1_range_loop: for range, r_idx in trace.selected_ranges {
+				start_idx := range.start
+				if cur_stat_offset.range_idx > r_idx {
+					continue
+				} else if cur_stat_offset.range_idx == r_idx {
+					start_idx = max(start_idx, cur_stat_offset.event_idx)
+				}
+
+				thread := trace.processes[range.pid].threads[range.tid]
+				events := thread.depths[range.did].events[start_idx:range.end]
+
+				for ev, e_idx in &events {
+					if event_count > iter_max {
+						cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
+						broke_early = true
+						break pass1_range_loop
+					}
+
+					duration := bound_duration(&ev, thread.max_time)
+					name := in_getstr(&trace.string_block, ev.name)
+					s, ok := sm_get(&trace.stats, ev.name)
+					if !ok {
+						s = sm_insert(&trace.stats, ev.name, Stats{min_time = max(i64)})
+					}
+
+					s.count += 1
+					s.total_time += duration
+					s.self_time += ev.self_time
+					s.min_time = min(s.min_time, duration)
+					s.max_time = max(s.max_time, duration)
+					total_tracked_time += duration
+
+					event_count += 1
+				}
+
+			}
+
+			if !broke_early {
+				stats_state = .Pass2
+				cur_stat_offset = StatOffset{}
+			}
+		}
+
+		if stats_state == .Pass2 {
+			pass2_range_loop: for range, r_idx in trace.selected_ranges {
+				start_idx := range.start
+				if cur_stat_offset.range_idx > r_idx {
+					continue
+				} else if cur_stat_offset.range_idx == r_idx {
+					start_idx = max(start_idx, cur_stat_offset.event_idx)
+				}
+
+				thread := trace.processes[range.pid].threads[range.tid]
+				events := thread.depths[range.did].events[start_idx:range.end]
+
+				for ev, e_idx in &events {
+					if event_count > iter_max {
+						cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
+						broke_early = true
+						break pass2_range_loop
+					}
+
+					duration := bound_duration(&ev, thread.max_time)
+					name := in_getstr(&trace.string_block, ev.name)
+					s, ok := sm_get(&trace.stats, ev.name)
+
+					if (s.max_time - s.min_time <= 0) {
+						s.hist[50] += 1
+					} else {
+						t := (duration - s.min_time) / (s.max_time - s.min_time)
+						t = min(1, max(t, 0))
+						t *= 99
+						s.hist[u32(t)] += 1
+					}
+
+					event_count += 1
+				}
+			}
+
+			if !broke_early {
+				for i := 0; i < len(trace.stats.entries); i += 1 {
+					stat := &trace.stats.entries[i].val
+					stat.avg_time = f64(stat.total_time) / f64(stat.count)
+				}
+
+				self_sort :: proc(a, b: StatEntry) -> bool {
+					return a.val.self_time > b.val.self_time
+				}
+				sm_sort(&trace.stats, self_sort)
+				stats_state = .Finished
+			}
+		}
+	}
 }
 
 draw_errorbox :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {

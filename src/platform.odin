@@ -196,18 +196,3 @@ when ODIN_OS != .Darwin && ODIN_OS != .Linux {
 get_system_color :: proc() -> bool { return false }
 get_session_storage :: proc(key: string) { }
 set_session_storage :: proc(key, val: string) { }
-
-should_sleep :: proc(cam: ^Camera, info_pane_scroll_vel: f64, stats_state: StatState, anim_playing: bool, render_one_more: bool) -> bool {
-	PAN_X_EPSILON :: 0.01
-	PAN_Y_EPSILON :: 1.0
-	SCALE_EPSILON :: 0.01
-	SCROLL_EPSILON :: 0.01
-
-	panning_x := math.abs(cam.pan.x - cam.target_pan_x) > PAN_X_EPSILON
-	panning_y := math.abs(cam.vel.y - 0) > PAN_Y_EPSILON
-	scaling   := math.abs((cam.current_scale - cam.target_scale) / cam.target_scale) > SCALE_EPSILON
-	scrolling := math.abs(info_pane_scroll_vel) > SCROLL_EPSILON
-	running_stats := stats_state != .Finished && stats_state != .NoStats
-
-	return (!render_one_more && !panning_x && !panning_y && !scaling && !scrolling && !running_stats && !anim_playing)
-}
