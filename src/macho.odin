@@ -73,6 +73,7 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		return false
 	}
 
+	tmp_buffer := make([]u8, 1024*1024, context.temp_allocator)
 	skew_size : u64 = 0
 	symbol_found := false
 	symbol_table_bytes := exec_buffer[symtab_header.symbol_table_offset:]
@@ -82,7 +83,12 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		symbol := slice_to_type(symbol_buffer, Mach_Symbol_Entry_64) or_return
 		symbol_name := string(cstring(raw_data(string_table_bytes[symbol.string_table_idx:])))
 
-		interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
+		demangled_name, ok2 := demangle_symbol(symbol_name, tmp_buffer)
+		if !ok2 {
+			return false
+		}
+
+		interned_symbol := in_get(&trace.intern, &trace.string_block, demangled_name)
 		am_insert(&trace.addr_map, symbol.value, interned_symbol)
 
 		if !symbol_found && symbol_name == "_spall_auto_init" {
