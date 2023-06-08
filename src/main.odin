@@ -223,13 +223,12 @@ load_config :: proc(pool: ^Pool, trace: ^Trace) -> bool {
 }
 
 spall_ctx: spall.Context
-spall_buffer: spall.Buffer
+@(thread_local) spall_buffer: spall.Buffer
 
 SELF_TRACE :: false
 FULL_SPEED :: false
 terminal_mode := false
 main :: proc() {
-
 	when SELF_TRACE {
 		current_time := time.time_to_unix(time.now())
 		trace_name := fmt.tprintf("spall_timing_%d.spall", current_time)
@@ -751,6 +750,11 @@ main :: proc() {
 		gl.Finish()
 		SDL.GL_SwapWindow(window)
 		gl.Finish()
+	}
+
+	when SELF_TRACE {
+		pool_wait(&global_pool)
+		pool_destroy(&global_pool)
 	}
 }
 

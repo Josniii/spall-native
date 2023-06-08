@@ -3,6 +3,7 @@ package main
 import "core:thread"
 import "core:sync"
 import "core:fmt"
+import "core:prof/spall"
 
 TaskProc :: proc(pool: ^Pool, data: rawptr)
 Pool_Task :: struct {
@@ -122,6 +123,12 @@ pool_worker :: proc(ptr: rawptr) {
 	current_thread_idx = current_thread.idx
 	pool := current_thread.pool
 
+	when SELF_TRACE {
+		buffer_backing := make([]u8, spall.BUFFER_DEFAULT_SIZE)
+		spall_buffer = spall.buffer_create(buffer_backing, u32(current_thread.idx))
+		defer spall.buffer_destroy(&spall_ctx, &spall_buffer)
+	}
+
 	work_start: for sync.atomic_load(&pool.running) {
 
 		finished_tasks := 0
@@ -212,5 +219,14 @@ pool_init :: proc(pool: ^Pool, child_thread_count: int) {
 	for i := 1; i < thread_count; i += 1 {
 		pool_thread_init(pool, &pool.threads[i], i)
 		pool.threads[i].thread = thread.create_and_start_with_data(&pool.threads[i], pool_worker)
+	}
+}
+
+pool_destroy :: proc(pool: ^Pool) {
+	pool.running = false
+	for i := 1; i < len(pool.threads); i += 1 {
+		sync.atomic_add(&pool.tasks_available, 1)
+		sync.futex_broadcast(&pool.tasks_available)
+		thread.join(pool.threads[i].thread)
 	}
 }
