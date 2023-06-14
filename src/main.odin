@@ -242,7 +242,6 @@ main :: proc() {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
 
-
 	// If the user passed us a trace, save off the filename now
 	if len(os.args) == 2 {
 		start_trace = strings.clone(os.args[1])

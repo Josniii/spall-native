@@ -34,7 +34,7 @@ ms_v1_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) ->
 		args := string(data_start[event_sz+i64(event.name_len):event_sz+i64(event.name_len)+i64(event.args_len)])
 
 		temp_ev.type = .Begin
-		temp_ev.timestamp = i64(event.time * 1000 * trace.stamp_scale)
+		temp_ev.timestamp = i64(event.time)
 		temp_ev.thread_id = event.tid
 		temp_ev.process_id = event.pid
 		temp_ev.name = in_get(&trace.intern, &trace.string_block, name)
@@ -50,7 +50,7 @@ ms_v1_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) ->
 		event := (^spall_fmt.End_Event_V1)(raw_data(data_start))
 
 		temp_ev.type = .End
-		temp_ev.timestamp = i64(event.time * 1000 * trace.stamp_scale)
+		temp_ev.timestamp = i64(event.time)
 		temp_ev.thread_id = event.tid
 		temp_ev.process_id = event.pid
 		
@@ -261,13 +261,12 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 		name := string(data_start[event_sz:event_sz+i64(event.name_len)])
 		args := string(data_start[event_sz+i64(event.name_len):event_sz+i64(event.name_len)+i64(event.args_len)])
 
-		timestamp := i64(ceil_f64(f64(event.time) * trace.stamp_scale))
 		ev := Event{
 			name = in_get(&trace.intern, &trace.string_block, name),
 			args = in_get(&trace.intern, &trace.string_block, args),
 			duration = -1,
 			self_time = 0,
-			timestamp = timestamp,
+			timestamp = i64(event.time),
 		}
 
 		if thread.max_time > ev.timestamp {
@@ -307,7 +306,6 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 			return .PartialRead
 		}
 		event := (^spall_fmt.End_Event_V2)(raw_data(data_start))
-		timestamp := i64(ceil_f64(f64(event.time) * trace.stamp_scale))
 
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
@@ -315,7 +313,7 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 
 			depth := &thread.depths[thread.current_depth]
 			jev := &depth.events[jev_idx]
-			jev.duration = timestamp - jev.timestamp
+			jev.duration = i64(event.time) - jev.timestamp
 			jev.self_time = jev.duration - jev.self_time
 			thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
 			trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)

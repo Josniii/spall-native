@@ -370,3 +370,7 @@ slice_to_type :: proc(buf: []u8, $T: typeid) -> (T, bool) #optional_ok {
 
     return intrinsics.unaligned_load((^T)(raw_data(buf))), true
 }
+
+disp_time :: proc(trace: ^Trace, ts: f64) -> f64 {
+	return ceil_f64(ts * trace.stamp_scale)
+}

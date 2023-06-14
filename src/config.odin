@@ -301,6 +301,8 @@ get_child_count :: proc(depth: ^Depth, idx: int) -> int {
 
 	return child_count
 }
+
+// This *must* take a leaf idx
 get_event_count :: proc(depth: ^Depth, idx: int) -> int {
 	last_prehang := len(depth.tree) - depth.overhang_len - 1
 	if idx == last_prehang {
@@ -310,6 +312,7 @@ get_event_count :: proc(depth: ^Depth, idx: int) -> int {
 	}
 	return BUCKET_SIZE
 }
+// This *must* take a leaf idx
 get_event_start_idx :: proc(depth: ^Depth, idx: int) -> int {
 	leaf_start := len(depth.tree) - depth.leaf_count - 1
 	overhang_start := len(depth.tree) - depth.overhang_len - 1
@@ -323,8 +326,39 @@ get_event_start_idx :: proc(depth: ^Depth, idx: int) -> int {
 		ev_offset := depth.overhang_len * BUCKET_SIZE
 		start_idx = (i * BUCKET_SIZE) + ev_offset
 	}
-
 	return start_idx
+}
+
+get_left_leaf :: proc(depth: ^Depth, idx: int) -> int {
+	tmp_idx := idx
+	last_tmp := idx
+	for tmp_idx < len(depth.tree) {
+		last_tmp = tmp_idx
+		tmp_idx = (CHUNK_NARY_WIDTH * tmp_idx) + 1
+	}
+	return last_tmp
+}
+get_right_leaf :: proc(depth: ^Depth, idx: int) -> int {
+	tmp_idx := idx
+	last_tmp := idx
+	for tmp_idx < len(depth.tree) {
+		last_tmp = tmp_idx
+		tmp_idx = (CHUNK_NARY_WIDTH * tmp_idx) + CHUNK_NARY_WIDTH
+	}
+	return min(last_tmp, len(depth.tree) - 1)
+}
+get_event_range :: proc(depth: ^Depth, idx: int) -> (int, int) {
+	left_idx := get_left_leaf(depth, idx)
+	right_idx := get_right_leaf(depth, idx)
+	event_start_idx := get_event_start_idx(depth, left_idx)
+	event_count := get_event_count(depth, right_idx)
+
+	leaf_count := right_idx - left_idx
+	ev_count := (leaf_count * BUCKET_SIZE) + event_count
+
+	start := event_start_idx
+	end := event_start_idx + ev_count
+	return start, end
 }
 
 pid_sort_proc :: proc(a, b: Process) -> bool { return a.min_time < b.min_time }
@@ -447,7 +481,10 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		trace.stamp_scale = hdr.timestamp_unit
 		header_size = size_of(spall_fmt.Manual_Header)
 
-		if hdr.version == 1 { file_type = .ManualStreamV1 }
+		if hdr.version == 1 { 
+			file_type = .ManualStreamV1 
+			trace.stamp_scale *= 1000
+		}
 		else if hdr.version == 2 { file_type = .ManualStreamV2 }
 
 	} else if magic == spall_fmt.AUTO_MAGIC {
@@ -530,6 +567,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	start_time = time.tick_now()
 	if file_type == .Json {
 		json_generate_selftimes(trace)
+		trace.stamp_scale = 1
 	}
 	fmt.printf("generate selftimes -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 }
