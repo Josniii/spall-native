@@ -40,8 +40,7 @@ cam := Camera{Vec2{0, 0}, Vec2{0, 0}, 0, 1, 1}
 // selection state
 selected_func : u32 = 0
 selected_event := EventID{-1, -1, -1, -1}
-
-pressed_event := EventID{-1, -1, -1, -1}
+pressed_event  := EventID{-1, -1, -1, -1}
 released_event := EventID{-1, -1, -1, -1}
 
 clicked_on_rect := false
@@ -67,16 +66,16 @@ default_cursor: ^SDL.Cursor
 pointer_cursor: ^SDL.Cursor
 
 // font data
-dpr: f64 = 1
-p_height : f64 = 14
-em : f64 = p_height
+dpr:       f64 = 1
+p_height:  f64 = 14
 h1_height: f64 = 18
 h2_height: f64 = 16
-p_font_size := p_height
-h1_font_size := h1_height
-h2_font_size := h2_height
-ch_width: f64 = 0
-thread_gap     : f64 = 8
+em:        f64 = p_height
+p_font_size:  f64 = p_height
+h1_font_size: f64 = h1_height
+h2_font_size: f64 = h2_height
+ch_width:   f64 = 0
+thread_gap: f64 = 8
 
 all_fonts: []^SDL_TTF.Font
 
@@ -453,7 +452,6 @@ main :: proc() {
 
 		should_toggle_fullscreen := false
 
-
 		// event polling
 		event: SDL.Event = ---
 		event_loop: for {
@@ -625,6 +623,9 @@ main :: proc() {
 			continue
 		}
 
+		ui_state.height = height
+		ui_state.width  = width
+
 		spall_x_pad     := 3 * em
 		header_height   := 3 * em
 		activity_height := 2 * em
@@ -634,15 +635,13 @@ main :: proc() {
 
 		topbars_height    := header_height + timebar_height + activity_height
 		minigraph_width   := 15 * em
-		flamegraph_width  := width - (spall_x_pad + minigraph_width)
-		flamegraph_height := height - topbars_height - ui_state.info_pane_height
+		flamegraph_width  := ui_state.width - (spall_x_pad + minigraph_width)
+		flamegraph_height := ui_state.height - topbars_height - ui_state.info_pane_height
 
 		tab_select_height := 2 * em
 		filter_pane_width := ui_state.filters_open ? (15 * em) : 0
 		stats_pane_x := filter_pane_width
 
-		ui_state.height = height
-		ui_state.width  = width
 		ui_state.side_pad                  = spall_x_pad
 		ui_state.rect_height               = rect_height
 		ui_state.topbars_height            = topbars_height
@@ -650,20 +649,20 @@ main :: proc() {
 		ui_state.flamegraph_toptext_height = (ui_state.top_line_gap * 2) + (2 * em)
 		ui_state.flamegraph_header_height  = ui_state.flamegraph_toptext_height + em
 
-		ui_state.header_rect             = Rect{0, 0, width, header_height}
-		ui_state.global_timebar_rect     = Rect{0, header_height, width, timebar_height}
+		ui_state.header_rect             = Rect{0, 0, ui_state.width, header_height}
+		ui_state.global_timebar_rect     = Rect{0, header_height, ui_state.width, timebar_height}
 		ui_state.global_activity_rect    = Rect{spall_x_pad, header_height + timebar_height, flamegraph_width, activity_height}
 		ui_state.local_timebar_rect      = Rect{spall_x_pad, header_height + timebar_height + activity_height, flamegraph_width, timebar_height}
 		ui_state.minimap_rect            = Rect{width - minigraph_width, topbars_height, minigraph_width, flamegraph_height}
 
-		ui_state.info_pane_rect          = Rect{0, height - ui_state.info_pane_height, width, ui_state.info_pane_height}
+		ui_state.info_pane_rect          = Rect{0, ui_state.height - ui_state.info_pane_height, ui_state.width, ui_state.info_pane_height}
 		ui_state.tab_rect                = Rect{0, ui_state.info_pane_rect.y, ui_state.width, tab_select_height}
 
 		pane_start_y := ui_state.tab_rect.y + ui_state.tab_rect.h
 
 		info_subpane_height := ui_state.info_pane_height - tab_select_height
 		ui_state.filter_pane_rect        = Rect{0, pane_start_y, filter_pane_width, info_subpane_height}
-		ui_state.stats_pane_rect         = Rect{stats_pane_x, pane_start_y, width - stats_pane_x, info_subpane_height}
+		ui_state.stats_pane_rect         = Rect{stats_pane_x, pane_start_y, ui_state.width - stats_pane_x, info_subpane_height}
 
 		ui_state.full_flamegraph_rect    = Rect{spall_x_pad, topbars_height, flamegraph_width, flamegraph_height}
 

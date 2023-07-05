@@ -958,7 +958,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 
 	mini_rect_height := (em / 2)
 	trace_duration := trace.total_max_time - trace.total_min_time
-	x_scale := rescale(1.0, 0, f64(trace_duration), 0, minimap_rect.w)
+	x_scale := rescale(1.0, 0, f64(trace_duration), 0, minimap_rect.w - (2 * minimap_pad))
 	y_scale := mini_rect_height / ui_state.rect_height
 
 	tree_y : f64 = padded_flamegraph_rect.y - (cam.pan.y * y_scale)
