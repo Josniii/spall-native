@@ -38,11 +38,6 @@ velocity_multiplier: f64 = 0
 cam := Camera{Vec2{0, 0}, Vec2{0, 0}, 0, 1, 1}
 
 // selection state
-selected_func : u32 = 0
-selected_event := EventID{-1, -1, -1, -1}
-pressed_event  := EventID{-1, -1, -1, -1}
-released_event := EventID{-1, -1, -1, -1}
-
 clicked_on_rect := false
 
 // tooltip-state
@@ -52,13 +47,9 @@ rendered_rect_tooltip := false
 
 did_pan := false
 
-stats_just_started := false
-stats_state := StatState.NoStats
 stat_sort_type := SortState.SelfTime
 stat_sort_descending := true
 resort_stats := false
-cur_stat_offset := StatOffset{}
-total_tracked_time : i64 = 0
 
 // drawing state
 colormode      := ColorMode.Dark
@@ -419,7 +410,6 @@ main :: proc() {
 			is_hovering = false
 			was_mouse_down = false
 			mouse_up_now = false
-			released_event = {-1, -1, -1, -1}
 			ui_state.render_one_more = false
 			frame_count += 1
 			free_all(context.temp_allocator)
@@ -622,6 +612,9 @@ main :: proc() {
 			SDL.GL_SwapWindow(window)
 			continue
 		}
+		defer {
+			trace.stats.released_event = {-1, -1, -1, -1}
+		}
 
 		ui_state.height = height
 		ui_state.width  = width
@@ -676,6 +669,7 @@ main :: proc() {
 
 		if post_loading {
 			if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 1000 }
+			ui_state.multiselecting = false
 			reset_flamegraph_camera(trace, &ui_state)
 
 			if trace.file_name != "" {
@@ -688,7 +682,7 @@ main :: proc() {
 		// process key/mouse inputs
 		if clicked {
 			did_pan = false
-			pressed_event = {-1, -1, -1, -1} // so no stale events are tracked
+			trace.stats.pressed_event = {-1, -1, -1, -1} // so no stale events are tracked
 		}
 		start_time, end_time, pan_delta := process_inputs(trace, dt, &ui_state)
 
@@ -709,7 +703,7 @@ main :: proc() {
 		process_stats(trace, &ui_state)
 
 		draw_stats(&rects, trace, &ui_state)
-		stats_just_started = false
+		trace.stats.just_started = false
 		if resort_stats {
 			sort_stats(trace)
 			resort_stats = false

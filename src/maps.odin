@@ -265,7 +265,7 @@ km_find :: proc (v: ^KeyMap, key: string) -> (FieldType, bool) {
 	return .Invalid, false
 }
 
-// Tracking for Stats
+// Tracking for FunctionStats
 SMMAP_LOAD_FACTOR :: 0.75
 StatMap :: struct {
 	entries: [dynamic]StatEntry,
@@ -311,7 +311,7 @@ sm_grow :: proc(v: ^StatMap) {
 	}
 }
 
-sm_get :: proc(v: ^StatMap, key: u32) -> (^Stats, bool) {
+sm_get :: proc(v: ^StatMap, key: u32) -> (^FunctionStats, bool) {
 	hv := sm_hash(u32(key)) & u32(len(v.hashes) - 1)
 
 	for i: u32 = 0; i < u32(len(v.hashes)); i += 1 {
@@ -330,7 +330,7 @@ sm_get :: proc(v: ^StatMap, key: u32) -> (^Stats, bool) {
 
 	push_fatal(SpallError.Bug)
 }
-sm_insert :: proc(v: ^StatMap, key: u32, val: Stats) -> ^Stats {
+sm_insert :: proc(v: ^StatMap, key: u32, val: FunctionStats) -> ^FunctionStats {
 	if i64(len(v.entries)) >= v.resize_threshold {
 		sm_grow(v)
 	}
@@ -370,6 +370,10 @@ sm_clear :: proc(v: ^StatMap)  {
 		v.hashes[i] = -1
 	}
 	v.resize_threshold = i64(f64(len(v.hashes)) * SMMAP_LOAD_FACTOR) 
+}
+sm_free :: proc(v: ^StatMap) {
+	delete(v.entries)
+	delete(v.hashes)
 }
 
 // Address Map hashtable

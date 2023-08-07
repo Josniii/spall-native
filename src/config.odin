@@ -81,6 +81,8 @@ free_trace :: proc(trace: ^Trace) {
 	delete(trace.processes)
 	delete(trace.string_block)
 	delete(trace.file_name)
+
+	sm_free(&trace.stats.stat_map)
 }
 
 bound_duration :: proc(ev: ^Event, max_ts: i64) -> i64 {
@@ -461,19 +463,32 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	start_time := time.tick_now()
 
 	trace^ = Trace{
-		processes = make([dynamic]Process),
-		selected_ranges = make([dynamic]Range),
-		stats = sm_init(),
-		process_map = vh_init(),
+		processes      = make([dynamic]Process),
+		process_map    = vh_init(),
+		string_block   = make([dynamic]u8),
+		intern         = in_init(),
+		addr_map       = am_init(),
+
 		total_max_time = min(i64),
 		total_min_time = max(i64),
+
 		event_count = 0,
 		stamp_scale = 1,
+
+		stats = Stats{
+			selected_ranges = make([dynamic]Range),
+			stat_map        = sm_init(),
+			state           = .NoStats,
+			just_started    = false,
+
+			selected_func   = 0,
+			selected_event  = {-1, -1, -1, -1},
+			pressed_event   = {-1, -1, -1, -1},
+			released_event  = {-1, -1, -1, -1},
+		},
+
 		base_name = filepath.base(file_name),
 		file_name = file_name,
-		string_block = make([dynamic]u8),
-		intern = in_init(),
-		addr_map = am_init(),
 		parser = Parser{},
 		error_message = "",
 	}

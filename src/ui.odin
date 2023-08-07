@@ -76,7 +76,7 @@ button :: proc(rects: ^[dynamic]DrawRect, in_rect: Rect, label_text, tooltip_tex
 	return false
 }
 
-draw_histogram :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, header: string, stat: ^Stats, pos: Vec2, graph_size: f64) {
+draw_histogram :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, header: string, stat: ^FunctionStats, pos: Vec2, graph_size: f64) {
 	line_width : f64 = 1
 	graph_edge_pad : f64 = 2 * em
 	line_gap := (em / 1.5)
@@ -324,8 +324,8 @@ draw_header :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState
 
 		// Process All Events
 		if button(rects, Rect{cursor_x, (header_rect.h / 2) - (button_height / 2), button_width, button_height}, "\uf1fe", "get stats for the whole file", .IconFont, 0, ui_state.width) {
-			trace.stats_start_time = 0
-			trace.stats_end_time = f64(trace.total_max_time - trace.total_min_time)
+			trace.stats.start_time = 0
+			trace.stats.end_time = f64(trace.total_max_time - trace.total_min_time)
 			ui_state.multiselecting = true
 			build_selected_ranges(trace, ui_state)
 		}
@@ -602,7 +602,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 				tree := depth.tree
 
 				found_rid := -1
-				range_loop: for range, r_idx in trace.selected_ranges {
+				range_loop: for range, r_idx in trace.stats.selected_ranges {
 					if range.pid == p_idx && range.tid == t_idx && range.did == d_idx {
 						found_rid = r_idx
 						break
@@ -652,7 +652,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 						grey := greyscale(cur_node.avg_color)
 						if ui_state.multiselecting {
 							if found_rid != -1 {
-								range := trace.selected_ranges[found_rid]   
+								range := trace.stats.selected_ranges[found_rid]   
 								ev_start, ev_end := get_event_range(&depth, tree_idx)
 
 								if !range_in_range(ev_start, ev_end, range.start, range.end) {
@@ -711,7 +711,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 							grey := greyscale(trace.color_choices[idx])
 							if ui_state.multiselecting {
 								if found_rid != -1 {
-									range := trace.selected_ranges[found_rid]   
+									range := trace.stats.selected_ranges[found_rid]   
 									if !val_in_range(e_idx, range.start, range.end - 1) { 
 										rect_color = grey
 									}
@@ -720,8 +720,10 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 								}
 							}
 
-							if int(selected_event.pid) == p_idx && int(selected_event.tid) == t_idx &&
-							int(selected_event.did) == d_idx && int(selected_event.eid) == e_idx {
+							if int(trace.stats.selected_event.pid) == p_idx &&
+							   int(trace.stats.selected_event.tid) == t_idx &&
+							   int(trace.stats.selected_event.did) == d_idx &&
+							   int(trace.stats.selected_event.eid) == e_idx {
 								rect_color.x += 30
 								rect_color.y += 30
 								rect_color.z += 30
@@ -762,10 +764,10 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 								}
 
 								if clicked && !shift_down {
-									pressed_event = {i64(p_idx), i64(t_idx), i64(d_idx), i64(e_idx)}
+									trace.stats.pressed_event = {i64(p_idx), i64(t_idx), i64(d_idx), i64(e_idx)}
 								}
 								if mouse_up_now && !shift_down {
-									released_event = {i64(p_idx), i64(t_idx), i64(d_idx), i64(e_idx)}
+									trace.stats.released_event = {i64(p_idx), i64(t_idx), i64(d_idx), i64(e_idx)}
 								}
 							}
 						}
@@ -977,7 +979,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 
 			for depth, d_idx in &thread.depths {
 				found_rid := -1
-				range_loop: for range, r_idx in trace.selected_ranges {
+				range_loop: for range, r_idx in trace.stats.selected_ranges {
 					if range.pid == p_idx && range.tid == t_idx && range.did == d_idx {
 						found_rid = r_idx
 						break
@@ -1020,7 +1022,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 						grey := greyscale(cur_node.avg_color)
 						if ui_state.multiselecting {
 							if found_rid != -1 {
-								range := trace.selected_ranges[found_rid]   
+								range := trace.stats.selected_ranges[found_rid]   
 								ev_start, ev_end := get_event_range(&depth, tree_idx)
 								if !range_in_range(ev_start, ev_end, range.start, range.end) {
 									rect_color = grey
@@ -1065,7 +1067,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 							grey := greyscale(trace.color_choices[idx])
 							if ui_state.multiselecting {
 								if found_rid != -1 {
-									range := trace.selected_ranges[found_rid]   
+									range := trace.stats.selected_ranges[found_rid]   
 									if !val_in_range(e_idx, range.start, range.end - 1) { 
 										rect_color = grey
 									}
@@ -1358,13 +1360,16 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 	pane_gapped_start_y := stats_pane_rect.y + ui_state.top_line_gap
 
 	// If the user selected a single rectangle
-	if selected_event.pid != -1 && selected_event.tid != -1 && selected_event.did != -1 && selected_event.eid != -1 {
+	if trace.stats.selected_event.pid != -1 &&
+	   trace.stats.selected_event.tid != -1 &&
+	   trace.stats.selected_event.did != -1 &&
+	   trace.stats.selected_event.eid != -1 {
 		y := pane_gapped_start_y
 
-		p_idx := int(selected_event.pid)
-		t_idx := int(selected_event.tid)
-		d_idx := int(selected_event.did)
-		e_idx := int(selected_event.eid)
+		p_idx := int(trace.stats.selected_event.pid)
+		t_idx := int(trace.stats.selected_event.tid)
+		d_idx := int(trace.stats.selected_event.did)
+		e_idx := int(trace.stats.selected_event.eid)
 
 		thread := trace.processes[p_idx].threads[t_idx]
 		event := thread.depths[d_idx].events[e_idx]
@@ -1379,21 +1384,21 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		draw_text(rects, fmt.tprintf(" self time: %s", time_fmt(disp_time(trace, f64(event.self_time)))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 
 		// If we've got stats cooking already
-	} else if stats_state == .Pass1 || stats_state == .Pass2 {
+	} else if trace.stats.state == .Pass1 || trace.stats.state == .Pass2 {
 		y := pane_gapped_start_y
 		center_x := ui_state.width / 2
 
 		total_count := 0
 		cur_count := 0
-		for range, r_idx in trace.selected_ranges {
+		for range, r_idx in trace.stats.selected_ranges {
 			thread := trace.processes[range.pid].threads[range.tid]
 			events := thread.depths[range.did].events
 
 			total_count += len(events)
-			if cur_stat_offset.range_idx > r_idx {
+			if trace.stats.cur_offset.range_idx > r_idx {
 				cur_count += len(events)
-			} else if cur_stat_offset.range_idx == r_idx {
-				cur_count += cur_stat_offset.event_idx - range.start
+			} else if trace.stats.cur_offset.range_idx == r_idx {
+				cur_count += trace.stats.cur_offset.event_idx - range.start
 			}
 		}
 
@@ -1402,7 +1407,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		hint_str := "Release multi-select to get the rest of the stats"
 
 		strs := []string{ loading_str, progress_str }
-		if stats_just_started && total_count >= INITIAL_ITER {
+		if trace.stats.just_started && total_count >= INITIAL_ITER {
 			strs = []string{ loading_str, progress_str, hint_str }
 		}
 
@@ -1418,7 +1423,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		}
 
 		// If stats are ready to display
-	} else if stats_state == .Finished && ui_state.multiselecting {
+	} else if trace.stats.state == .Finished && ui_state.multiselecting {
 		y := pane_gapped_start_y
 
 		header_start := y
@@ -1440,8 +1445,8 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		y += header_height + (em / 2)
 
 		displayed_lines := int(ui_state.stats_pane_rect.h / ui_state.line_height) - 1
-		if displayed_lines < len(trace.stats.entries) {
-			max_lines := len(trace.stats.entries)
+		if displayed_lines < len(trace.stats.stat_map.entries) {
+			max_lines := len(trace.stats.stat_map.entries)
 
 			// goofy hack to get line height
 			tmp := y
@@ -1455,8 +1460,8 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 
 		stat_idx := 0
 		last_pos := 0.0
-		stat_loop: for i := 0; i < len(trace.stats.entries); i += 1 {
-			entry := trace.stats.entries[i]
+		stat_loop: for i := 0; i < len(trace.stats.stat_map.entries); i += 1 {
+			entry := trace.stats.stat_map.entries[i]
 			name := entry.key
 			stat := entry.val
 
@@ -1481,20 +1486,20 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 			}
 
 			if clicked && pt_in_rect(clicked_pos, click_rect) {
-				if selected_func == name {
-					selected_func = 0
+				if trace.stats.selected_func == name {
+					trace.stats.selected_func = 0
 				} else {
-					selected_func = name
+					trace.stats.selected_func = name
 				}
 			}
 
-			if selected_func == name {
+			if trace.stats.selected_func == name {
 				draw_rect(rects, click_rect, highlight_color)
 			}
 
 			cursor = stats_pane_x
 
-			total_perc := (f64(stat.total_time) / f64(total_tracked_time)) * 100
+			total_perc := (f64(stat.total_time) / f64(trace.stats.total_time)) * 100
 
 			total_text := fmt.tprintf("%10s", stat_fmt(disp_time(trace, f64(stat.total_time))))
 			total_perc_text := fmt.tprintf("%.1f%%", total_perc)
@@ -1532,7 +1537,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 			next_line(&y, em)
 		}
 
-		if selected_func > 0 {
+		if trace.stats.selected_func > 0 {
 			histogram_height := 18 * em
 			line_gap := (em / 1.5)
 			edge_gap := (em / 2)
@@ -1541,8 +1546,8 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 				info_pane_rect.y - histogram_height - ((em + line_gap) * 2) - edge_gap,
 			}
 
-			name_str := in_getstr(&trace.string_block, selected_func)
-			stat, ok := sm_get(&trace.stats, selected_func)
+			name_str := in_getstr(&trace.string_block, trace.stats.selected_func)
+			stat, ok := sm_get(&trace.stats.stat_map, trace.stats.selected_func)
 			if ok {
 				draw_histogram(rects, trace, name_str, stat, pos, histogram_height)
 			}
@@ -1628,8 +1633,8 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 	info_pane_rect := ui_state.info_pane_rect
 
 	// Handle single-select
-	if mouse_up_now && !did_pan && pt_in_rect(clicked_pos, inner_flamegraph_rect) && pressed_event == released_event && !shift_down {
-		selected_event = released_event
+	if mouse_up_now && !did_pan && pt_in_rect(clicked_pos, inner_flamegraph_rect) && trace.stats.pressed_event == trace.stats.released_event && !shift_down {
+		trace.stats.selected_event = trace.stats.released_event
 		clicked_on_rect = true
 		ui_state.multiselecting = false
 		ui_state.render_one_more = true
@@ -1637,12 +1642,12 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 
 	// Handle de-select
 	if mouse_up_now && !did_pan && pt_in_rect(clicked_pos, inner_flamegraph_rect) && !clicked_on_rect && !shift_down {
-		selected_event = {-1, -1, -1, -1}
-		resize(&trace.selected_ranges, 0)
+		trace.stats.selected_event = {-1, -1, -1, -1}
+		resize(&trace.stats.selected_ranges, 0)
 
 		multiselect_t = 0
+		trace.stats.state = .NoStats
 		ui_state.multiselecting = false
-		stats_state = .NoStats
 		ui_state.render_one_more = true
 	}
 
@@ -1685,11 +1690,11 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		flopped_rect.y = selected_rect.y
 		flopped_rect.h = selected_rect.h
 
-		trace.stats_start_time = to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x)
-		trace.stats_end_time   = to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x + flopped_rect.w)
+		trace.stats.start_time = to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x)
+		trace.stats.end_time   = to_world_x(cam, flopped_rect.x - full_flamegraph_rect.x + flopped_rect.w)
 
 		// draw multiselect timerange
-		width_text := measure_fmt(disp_time(trace, trace.stats_end_time - trace.stats_start_time))
+		width_text := measure_fmt(disp_time(trace, trace.stats.end_time - trace.stats.start_time))
 		width_text_width := measure_text(width_text, .PSize, .MonoFont) + em
 
 		text_bg_rect  := flopped_rect
@@ -1772,7 +1777,7 @@ sort_stats :: proc(trace: ^Trace) {
 			}
 		}
 	}
-	sm_sort(&trace.stats, less)
+	sm_sort(&trace.stats.stat_map, less)
 }
 
 process_inputs :: proc(trace: ^Trace, dt: f64, ui_state: ^UIState) -> (i64, i64, Vec2) {
@@ -1928,7 +1933,7 @@ process_inputs :: proc(trace: ^Trace, dt: f64, ui_state: ^UIState) -> (i64, i64,
 }
 
 build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
-	init_stat_state(trace, ui_state)
+	init_stat_state(&trace.stats, ui_state)
 
 	// build out ranges
 	for proc_v, p_idx in trace.processes {
@@ -1938,8 +1943,8 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 			}
 
 			for depth, d_idx in thread.depths {
-				start_idx := find_idx(trace, depth.events[:], i64(trace.stats_start_time))
-				end_idx := find_idx(trace, depth.events[:], i64(trace.stats_end_time))
+				start_idx := find_idx(trace, depth.events[:], i64(trace.stats.start_time))
+				end_idx := find_idx(trace, depth.events[:], i64(trace.stats.end_time))
 				if start_idx == -1 {
 					start_idx = 0
 				}
@@ -1954,7 +1959,7 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 
 					start := f64(ev.timestamp - trace.total_min_time)
 					width := f64(bound_duration(&ev, thread.max_time))
-					if !range_in_range(start, start + width, trace.stats_start_time, trace.stats_end_time) {
+					if !range_in_range(start, start + width, trace.stats.start_time, trace.stats.end_time) {
 						continue fwd_scan_loop
 					}
 
@@ -1968,7 +1973,7 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 
 					start := f64(ev.timestamp - trace.total_min_time)
 					width := f64(bound_duration(&ev, thread.max_time))
-					if !range_in_range(start, start + width, trace.stats_start_time, trace.stats_end_time) {
+					if !range_in_range(start, start + width, trace.stats.start_time, trace.stats.end_time) {
 						continue rev_scan_loop
 					}
 
@@ -1977,26 +1982,26 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 				}
 
 				if real_start != -1 && real_end != -1 {
-					append(&trace.selected_ranges, Range{p_idx, t_idx, d_idx, real_start, real_end})
+					append(&trace.stats.selected_ranges, Range{p_idx, t_idx, d_idx, real_start, real_end})
 				}
 			}
 		}
 	}
 }
 
-init_stat_state :: proc(trace: ^Trace, ui_state: ^UIState) {
-	stats_state = .Pass1
-	total_tracked_time = 0
-	cur_stat_offset = StatOffset{}
-	selected_event = {-1, -1, -1, -1}
+init_stat_state :: proc(stats: ^Stats, ui_state: ^UIState) {
+	stats.state = .Pass1
+	stats.total_time = 0
+	stats.cur_offset = StatOffset{}
+	stats.selected_event = {-1, -1, -1, -1}
 
 	ui_state.stats_pane_scroll_pos = 0
 	ui_state.stats_pane_scroll_vel = 0
 
-	stats_just_started = true
+	stats.just_started = true
 
-	sm_clear(&trace.stats)
-	resize(&trace.selected_ranges, 0)
+	sm_clear(&stats.stat_map)
+	resize(&stats.selected_ranges, 0)
 }
 
 process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
@@ -2004,23 +2009,23 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
 
-	if stats_state == .Finished || stats_state == .NoStats {
+	if trace.stats.state == .Finished || trace.stats.state == .NoStats {
 		return
 	}
 
 	ui_state.render_one_more = true
-	if (stats_state == .Pass1 || stats_state == .Pass2) {
+	if (trace.stats.state == .Pass1 || trace.stats.state == .Pass2) {
 		event_count := 0
-		iter_max := stats_just_started ? INITIAL_ITER : FULL_ITER
+		iter_max := trace.stats.just_started ? INITIAL_ITER : FULL_ITER
 
 		broke_early := false
-		if stats_state == .Pass1 {
-			pass1_range_loop: for range, r_idx in trace.selected_ranges {
+		if trace.stats.state == .Pass1 {
+			pass1_range_loop: for range, r_idx in trace.stats.selected_ranges {
 				start_idx := range.start
-				if cur_stat_offset.range_idx > r_idx {
+				if trace.stats.cur_offset.range_idx > r_idx {
 					continue
-				} else if cur_stat_offset.range_idx == r_idx {
-					start_idx = max(start_idx, cur_stat_offset.event_idx)
+				} else if trace.stats.cur_offset.range_idx == r_idx {
+					start_idx = max(start_idx, trace.stats.cur_offset.event_idx)
 				}
 
 				thread := trace.processes[range.pid].threads[range.tid]
@@ -2028,16 +2033,16 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 
 				for ev, e_idx in &events {
 					if event_count > iter_max {
-						cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
+						trace.stats.cur_offset = StatOffset{r_idx, start_idx + e_idx}
 						broke_early = true
 						break pass1_range_loop
 					}
 
 					duration := bound_duration(&ev, thread.max_time)
 					name := in_getstr(&trace.string_block, ev.name)
-					s, ok := sm_get(&trace.stats, ev.name)
+					s, ok := sm_get(&trace.stats.stat_map, ev.name)
 					if !ok {
-						s = sm_insert(&trace.stats, ev.name, Stats{min_time = max(i64), max_time = min(i64)})
+						s = sm_insert(&trace.stats.stat_map, ev.name, FunctionStats{min_time = max(i64), max_time = min(i64)})
 					}
 
 					s.count += 1
@@ -2045,7 +2050,7 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 					s.self_time += ev.self_time
 					s.min_time = min(s.min_time, duration)
 					s.max_time = max(s.max_time, duration)
-					total_tracked_time += duration
+					trace.stats.total_time += duration
 
 					event_count += 1
 				}
@@ -2053,18 +2058,18 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 			}
 
 			if !broke_early {
-				stats_state = .Pass2
-				cur_stat_offset = StatOffset{}
+				trace.stats.state = .Pass2
+				trace.stats.cur_offset = StatOffset{}
 			}
 		}
 
-		if stats_state == .Pass2 {
-			pass2_range_loop: for range, r_idx in trace.selected_ranges {
+		if trace.stats.state == .Pass2 {
+			pass2_range_loop: for range, r_idx in trace.stats.selected_ranges {
 				start_idx := range.start
-				if cur_stat_offset.range_idx > r_idx {
+				if trace.stats.cur_offset.range_idx > r_idx {
 					continue
-				} else if cur_stat_offset.range_idx == r_idx {
-					start_idx = max(start_idx, cur_stat_offset.event_idx)
+				} else if trace.stats.cur_offset.range_idx == r_idx {
+					start_idx = max(start_idx, trace.stats.cur_offset.event_idx)
 				}
 
 				thread := trace.processes[range.pid].threads[range.tid]
@@ -2072,13 +2077,13 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 
 				for ev, e_idx in &events {
 					if event_count > iter_max {
-						cur_stat_offset = StatOffset{r_idx, start_idx + e_idx}
+						trace.stats.cur_offset = StatOffset{r_idx, start_idx + e_idx}
 						broke_early = true
 						break pass2_range_loop
 					}
 
 					duration := bound_duration(&ev, thread.max_time)
-					s, _ := sm_get(&trace.stats, ev.name)
+					s, _ := sm_get(&trace.stats.stat_map, ev.name)
 
 					idx: u32
 					if (s.max_time - s.min_time <= 0) {
@@ -2096,16 +2101,16 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 			}
 
 			if !broke_early {
-				for i := 0; i < len(trace.stats.entries); i += 1 {
-					stat := &trace.stats.entries[i].val
+				for i := 0; i < len(trace.stats.stat_map.entries); i += 1 {
+					stat := &trace.stats.stat_map.entries[i].val
 					stat.avg_time = f64(stat.total_time) / f64(stat.count)
 				}
 
 				self_sort :: proc(a, b: StatEntry) -> bool {
 					return a.val.self_time > b.val.self_time
 				}
-				sm_sort(&trace.stats, self_sort)
-				stats_state = .Finished
+				sm_sort(&trace.stats.stat_map, self_sort)
+				trace.stats.state = .Finished
 			}
 		}
 	}

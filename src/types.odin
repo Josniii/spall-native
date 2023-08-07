@@ -128,7 +128,7 @@ EventID :: struct {
 	did: i64,
 	eid: i64,
 }
-Stats :: struct {
+FunctionStats :: struct {
 	total_time: i64,
 	self_time: i64,
 	avg_time: f64,
@@ -153,7 +153,7 @@ StatState :: enum {
 }
 StatEntry :: struct {
 	key: u32,
-	val: Stats,
+	val: FunctionStats,
 }
 SortState :: enum {
 	SelfTime,
@@ -207,6 +207,24 @@ Event :: struct #packed {
 	self_time: i64,
 }
 
+Stats :: struct {
+	selected_ranges: [dynamic]Range,
+	stat_map:        StatMap,
+	state:           StatState,
+
+	start_time:      f64,
+	end_time:        f64,
+	total_time:      i64,
+
+	cur_offset:      StatOffset,
+	just_started:    bool,
+
+	selected_func:   u32,
+	selected_event:  EventID,
+	pressed_event:   EventID,
+	released_event:  EventID,
+}
+
 COLOR_CHOICES :: 16
 Trace :: struct {
 	file_name: string,
@@ -222,17 +240,15 @@ Trace :: struct {
 
 	processes: [dynamic]Process,
 	process_map: ValHash,
-	selected_ranges: [dynamic]Range,
-	stats: StatMap,
 	global_instants: [dynamic]Instant,
-	stats_start_time: f64,
-	stats_end_time: f64,
 
 	total_max_time: i64,
 	total_min_time: i64,
 	event_count: u64,
 	instant_count: u64,
 	stamp_scale: f64,
+
+	stats: Stats,
 
 	error_message: string,
 	error_storage: [4096]u8,
