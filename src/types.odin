@@ -26,6 +26,7 @@ UIState :: struct {
 	top_line_gap: f64,
 	topbars_height: f64,
 	line_height: f64,
+	grip_delta: f64,
 
 	flamegraph_header_height: f64,
 	flamegraph_toptext_height: f64,
