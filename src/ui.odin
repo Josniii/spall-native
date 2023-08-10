@@ -1994,6 +1994,8 @@ init_stat_state :: proc(stats: ^Stats, ui_state: ^UIState) {
 	stats.total_time = 0
 	stats.cur_offset = StatOffset{}
 	stats.selected_event = {-1, -1, -1, -1}
+	stats.pressed_event  = {-1, -1, -1, -1}
+	stats.released_event = {-1, -1, -1, -1}
 
 	ui_state.stats_pane_scroll_pos = 0
 	ui_state.stats_pane_scroll_vel = 0

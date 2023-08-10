@@ -198,7 +198,7 @@ load_config :: proc(pool: ^Pool, trace: ^Trace) -> bool {
 	}
 
 	free_trace(trace)
-	trace^ = Trace{}
+	init_trace(trace)
 	loading_config = true
 
 	state := new(ThreadFileLoadState)
@@ -217,6 +217,7 @@ spall_ctx: spall.Context
 
 SELF_TRACE :: false
 FULL_SPEED :: false
+GOOD_BOY_MODE :: false
 terminal_mode := false
 main :: proc() {
 	when SELF_TRACE {
@@ -241,6 +242,8 @@ main :: proc() {
 	pool_init(&global_pool, thread_count)
 
 	trace := new(Trace)
+	init_trace(trace)
+
 	if terminal_mode {
 		if start_trace == "" {
 			return
@@ -750,9 +753,23 @@ main :: proc() {
 		gl.Finish()
 	}
 
-	when SELF_TRACE {
+	when SELF_TRACE || GOOD_BOY_MODE {
 		pool_wait(&global_pool)
 		pool_destroy(&global_pool)
+	}
+
+	when GOOD_BOY_MODE {
+		gl.destroy_uniforms(rect_uniforms)
+
+		delete(all_fonts)
+		delete(rects)
+		delete(text_rects)
+
+		free_trace(trace)
+		free(trace)
+
+		queue.destroy(&fps_history)
+		lru.destroy(&lru_text_cache, true)
 	}
 }
 

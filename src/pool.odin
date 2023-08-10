@@ -229,4 +229,11 @@ pool_destroy :: proc(pool: ^Pool) {
 		sync.futex_broadcast(&pool.tasks_available)
 		thread.join(pool.threads[i].thread)
 	}
+
+	when GOOD_BOY_MODE {
+		for thread in pool.threads {
+			delete(thread.queue)
+		}
+		delete(pool.threads)
+	}
 }

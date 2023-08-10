@@ -66,9 +66,9 @@ free_trace_temps :: proc(trace: ^Trace) {
 		}
 		vh_free(&process.thread_map)
 	}
-	vh_free(&trace.process_map)
 	in_free(&trace.intern)
 	am_free(&trace.addr_map)
+	vh_free(&trace.process_map)
 }
 
 free_trace :: proc(trace: ^Trace) {
@@ -82,6 +82,7 @@ free_trace :: proc(trace: ^Trace) {
 	delete(trace.string_block)
 	delete(trace.file_name)
 
+	delete(trace.stats.selected_ranges)
 	sm_free(&trace.stats.stat_map)
 }
 
@@ -459,16 +460,26 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 	return true
 }
 
-load_file :: proc(trace: ^Trace, file_name: string) {
-	start_time := time.tick_now()
+init_trace_allocs :: proc(trace: ^Trace, file_name: string) {
+	trace.processes    = make([dynamic]Process)
+	trace.process_map  = vh_init()
+	trace.string_block = make([dynamic]u8)
+	trace.intern       = in_init()
+	trace.addr_map     = am_init()
 
+	trace.stats.selected_ranges = make([dynamic]Range)
+	trace.stats.stat_map        = sm_init()
+
+	trace.base_name = filepath.base(file_name)
+	trace.file_name = file_name
+
+	// deliberately setting the first elem to 0, to simplify string interactions
+	append_elem(&trace.string_block, 0)
+	append_elem(&trace.string_block, 0)
+}
+
+init_trace :: proc(trace: ^Trace) {
 	trace^ = Trace{
-		processes      = make([dynamic]Process),
-		process_map    = vh_init(),
-		string_block   = make([dynamic]u8),
-		intern         = in_init(),
-		addr_map       = am_init(),
-
 		total_max_time = min(i64),
 		total_min_time = max(i64),
 
@@ -476,8 +487,6 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		stamp_scale = 1,
 
 		stats = Stats{
-			selected_ranges = make([dynamic]Range),
-			stat_map        = sm_init(),
 			state           = .NoStats,
 			just_started    = false,
 
@@ -487,14 +496,16 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 			released_event  = {-1, -1, -1, -1},
 		},
 
-		base_name = filepath.base(file_name),
-		file_name = file_name,
 		parser = Parser{},
 		error_message = "",
 	}
-	// deliberately setting the first elem to 0, to simplify string interactions
-	append_elem(&trace.string_block, 0)
-	append_elem(&trace.string_block, 0)
+}
+
+load_file :: proc(trace: ^Trace, file_name: string) {
+	start_time := time.tick_now()
+
+	init_trace(trace)
+	init_trace_allocs(trace, file_name)
 
 	trace_fd, err := os.open(file_name)
 	if err != 0 {
