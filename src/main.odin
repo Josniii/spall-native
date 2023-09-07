@@ -24,6 +24,8 @@ import SDL_TTF "vendor:sdl2/ttf"
 is_mouse_down  := false
 was_mouse_down := false
 clicked        := false
+double_clicked := false
+clicked_t      : time.Tick
 mouse_up_now   := false
 is_hovering    := false
 shift_down     := false
@@ -41,7 +43,7 @@ cam := Camera{Vec2{0, 0}, Vec2{0, 0}, 0, 1, 1}
 clicked_on_rect := false
 
 // tooltip-state
-rect_tooltip_rect := EventID{-1, -1, -1, -1}
+rect_tooltip_rect := empty_event
 rect_tooltip_pos := Vec2{}
 rendered_rect_tooltip := false
 
@@ -104,6 +106,36 @@ idx_pos := [?]glm.vec2{
 	{1.0, 1.0},
 }
 
+set_flamegraph_camera :: proc(trace: ^Trace, ui_state: ^UIState, start_ticks, duration_ticks: i64) {
+	fmt.printf("new pan_x: %v, scale: %.8f\n", cam.pan.x, cam.current_scale)
+	cam.vel = Vec2{}
+
+	adj_duration_time  := f64(duration_ticks) * trace.stamp_scale
+
+	cam.current_scale = rescale(1.0, 0, adj_duration_time, 0, ui_state.full_flamegraph_rect.w)
+	cam.target_scale = cam.current_scale
+
+	adj_start_ticks := start_ticks - trace.total_min_time
+	adj_start_time := f64(adj_start_ticks) * trace.stamp_scale
+	fmt.printf("start %v, dur %v\n", start_ticks, duration_ticks)
+	fmt.printf("min time: %v, scaled start: %v, start time: %v\n", trace.total_min_time, adj_start_ticks, adj_start_time)
+
+	cam.pan.x = -(adj_start_time * cam.current_scale)
+	cam.target_pan_x = cam.pan.x
+
+	fmt.printf("new pan_x: %v, scale: %.8f\n", cam.pan.x, cam.current_scale)
+	start, end := get_current_window(trace, cam, ui_state)
+	fmt.printf("%v, %v | %v\n", start, end, end - start)
+
+	real_size   := time_fmt(adj_duration_time)
+	window_size := time_fmt(f64(end - start))
+
+	real_start    := time_fmt(adj_start_time)
+	window_start  := time_fmt(f64(start))
+	fmt.printf("%s == %s\n", real_size, window_size)
+	fmt.printf("%s == %s\n", real_start, window_start)
+}
+
 reset_flamegraph_camera :: proc(trace: ^Trace, ui_state: ^UIState) {
 	cam = Camera{Vec2{0, 0}, Vec2{0, 0}, 0, 1, 1}
 	if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 100000000000000; trace.stamp_scale = 1; }
@@ -119,6 +151,16 @@ reset_flamegraph_camera :: proc(trace: ^Trace, ui_state: ^UIState) {
 	cam.pan.x += side_pad
 	cam.target_pan_x = cam.pan.x
 }
+
+get_event :: proc(trace: ^Trace, ev_id: EventID) -> ^Event {
+	p_idx := ev_id.pid
+	t_idx := ev_id.tid
+	d_idx := ev_id.did
+	e_idx := ev_id.eid
+
+	return &trace.processes[p_idx].threads[t_idx].depths[d_idx].events[e_idx]
+}
+
 
 load_font :: proc(rw: ^SDL.RWops, size: i32) -> (^SDL_TTF.Font, bool) {
 	font := SDL_TTF.OpenFontRW(rw, true, size)
@@ -232,6 +274,7 @@ main :: proc() {
 
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
+	clicked_t = time.tick_now()
 
 	// If the user passed us a trace, save off the filename now
 	if len(os.args) == 2 {
@@ -410,6 +453,7 @@ main :: proc() {
 	main_loop: for {
 		defer {
 			clicked = false
+			double_clicked = false
 			is_hovering = false
 			was_mouse_down = false
 			mouse_up_now = false
@@ -418,10 +462,18 @@ main :: proc() {
 			free_all(context.temp_allocator)
 		}
 
-		rect_tooltip_rect = EventID{-1, -1, -1, -1}
+		rect_tooltip_rect = empty_event
 		rect_tooltip_pos = Vec2{}
 		rendered_rect_tooltip = false
 
+		if !event_cmp(trace.zoom_event, empty_event) {
+			ev := get_event(trace, trace.zoom_event)
+			thread := trace.processes[trace.zoom_event.pid].threads[trace.zoom_event.tid]
+			duration := bound_duration(ev, thread.max_time)
+
+			set_flamegraph_camera(trace, &ui_state, ev.timestamp, duration)
+			trace.zoom_event = empty_event
+		}
 
 		cur_tick := time.tick_now()
 		duration := time.tick_since(start_tick)
@@ -491,46 +543,19 @@ main :: proc() {
 					ctrl_down = false
 				}
 			case .MOUSEMOTION:
-				if frame_count != last_frame_count {
-					last_mouse_pos = mouse_pos
-					last_frame_count = frame_count
-				}
-
-				mouse_pos = Vec2{f64(event.motion.x), f64(event.motion.y)}
+				mouse_moved(f64(event.motion.x), f64(event.motion.y))
 			case .MOUSEBUTTONDOWN:
 				switch event.button.button {
 				case SDL.BUTTON_LEFT:
-					is_mouse_down = true
-					mouse_pos = Vec2{f64(event.button.x), f64(event.button.y)}
-
-					if frame_count != last_frame_count {
-						last_mouse_pos = mouse_pos
-						last_frame_count = frame_count
-					}
-
-					clicked = true
-					clicked_pos = mouse_pos
+					mouse_down(f64(event.button.x), f64(event.button.y))
 				}
 			case .MOUSEBUTTONUP:
 				switch event.button.button {
 				case SDL.BUTTON_LEFT:
-					is_mouse_down = false
-					was_mouse_down = true
-					mouse_up_now = true
-
-					if frame_count != last_frame_count {
-						last_mouse_pos = mouse_pos
-						last_frame_count = frame_count
-					}
-
-					mouse_pos = Vec2{f64(event.button.x), f64(event.button.y)}
+					mouse_up(f64(event.button.x), f64(event.button.y))
 				}
 			case .MOUSEWHEEL:
-				y_dist := f64(event.wheel.y) * velocity_multiplier
-				if ctrl_down {
-					y_dist *= 10
-				}
-				scroll_val_y += y_dist
+				mouse_scroll(f64(event.wheel.y))
 			case .WINDOWEVENT:
 				#partial switch event.window.event {
 				case .RESIZED:
@@ -616,7 +641,7 @@ main :: proc() {
 			continue
 		}
 		defer {
-			trace.stats.released_event = {-1, -1, -1, -1}
+			trace.stats.released_event = empty_event
 		}
 
 		ui_state.height = height
@@ -685,7 +710,7 @@ main :: proc() {
 		// process key/mouse inputs
 		if clicked {
 			did_pan = false
-			trace.stats.pressed_event = {-1, -1, -1, -1} // so no stale events are tracked
+			trace.stats.pressed_event = empty_event // so no stale events are tracked
 		}
 		start_time, end_time, pan_delta := process_inputs(trace, dt, &ui_state)
 

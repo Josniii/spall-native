@@ -4,11 +4,66 @@ import "core:strings"
 import "core:fmt"
 import "core:math"
 import "core:container/lru"
+import "core:time"
 
 import SDL "vendor:sdl2"
 import SDL_TTF "vendor:sdl2/ttf"
 import gl "vendor:OpenGL"
 
+mouse_down :: proc(x, y: f64) {
+	is_mouse_down = true
+	mouse_pos = Vec2{x, y}
+
+	if frame_count != last_frame_count {
+		last_mouse_pos = mouse_pos
+		last_frame_count = frame_count
+	}
+
+	clicked = true
+	clicked_pos = mouse_pos
+
+	cur_time := time.tick_now()
+	time_diff := time.tick_diff(clicked_t, cur_time)
+	click_window := time.duration_milliseconds(time_diff)
+	double_click_window_ms := 400.0
+
+	if click_window < double_click_window_ms {
+		double_clicked = true
+	} else {
+		double_clicked = false
+	}
+	clicked_t = cur_time
+}
+
+mouse_up :: proc(x, y: f64) {
+	is_mouse_down = false
+	was_mouse_down = true
+	mouse_up_now = true
+
+	if frame_count != last_frame_count {
+		last_mouse_pos = mouse_pos
+		last_frame_count = frame_count
+	}
+
+	mouse_pos = Vec2{x, y}
+}
+
+mouse_moved :: proc(x, y: f64) {
+	if frame_count != last_frame_count {
+		last_mouse_pos = mouse_pos
+		last_frame_count = frame_count
+	}
+
+	mouse_pos = Vec2{x, y}
+}
+
+mouse_scroll :: proc(y: f64) {
+	y_dist := y * velocity_multiplier
+	if ctrl_down {
+		y_dist *= 10
+	}
+	scroll_val_y += y_dist
+}
 
 draw_rect :: proc(rects: ^[dynamic]DrawRect, rect: Rect, color: BVec4) {
 	append(rects, DrawRect{FVec4{f32(rect.x), f32(rect.y), f32(rect.w), f32(rect.h)}, color, FVec2{-2, 0.0}})

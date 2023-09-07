@@ -486,14 +486,15 @@ init_trace :: proc(trace: ^Trace) {
 		event_count = 0,
 		stamp_scale = 1,
 
+		zoom_event = empty_event,
 		stats = Stats{
 			state           = .NoStats,
 			just_started    = false,
 
 			selected_func   = 0,
-			selected_event  = {-1, -1, -1, -1},
-			pressed_event   = {-1, -1, -1, -1},
-			released_event  = {-1, -1, -1, -1},
+			selected_event  = empty_event,
+			pressed_event   = empty_event,
+			released_event  = empty_event,
 		},
 
 		parser = Parser{},

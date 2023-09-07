@@ -106,7 +106,7 @@ draw_histogram :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, header: string,
 
 	// reset mouse if we're in the graph
 	if pt_in_rect(mouse_pos, graph_overdraw_rect) {
-		rect_tooltip_rect = EventID{-1, -1, -1, -1}
+		rect_tooltip_rect = empty_event
 		rect_tooltip_pos = Vec2{}
 		rendered_rect_tooltip = false
 		reset_cursor()
@@ -768,6 +768,9 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 								}
 								if mouse_up_now && !shift_down {
 									trace.stats.released_event = {i64(p_idx), i64(t_idx), i64(d_idx), i64(e_idx)}
+								}
+								if double_clicked && !shift_down {
+									trace.zoom_event = {i64(p_idx), i64(t_idx), i64(d_idx), i64(e_idx)}
 								}
 							}
 						}
@@ -1643,7 +1646,7 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 
 	// Handle de-select
 	if mouse_up_now && !did_pan && pt_in_rect(clicked_pos, inner_flamegraph_rect) && !clicked_on_rect && !shift_down {
-		trace.stats.selected_event = {-1, -1, -1, -1}
+		trace.stats.selected_event = empty_event
 		resize(&trace.stats.selected_ranges, 0)
 
 		multiselect_t = 0
@@ -1994,9 +1997,9 @@ init_stat_state :: proc(stats: ^Stats, ui_state: ^UIState) {
 	stats.state = .Pass1
 	stats.total_time = 0
 	stats.cur_offset = StatOffset{}
-	stats.selected_event = {-1, -1, -1, -1}
-	stats.pressed_event  = {-1, -1, -1, -1}
-	stats.released_event = {-1, -1, -1, -1}
+	stats.selected_event = empty_event
+	stats.pressed_event  = empty_event
+	stats.released_event = empty_event
 
 	ui_state.stats_pane_scroll_pos = 0
 	ui_state.stats_pane_scroll_vel = 0

@@ -129,6 +129,17 @@ EventID :: struct {
 	did: i64,
 	eid: i64,
 }
+
+empty_event := EventID{-1, -1, -1, -1}
+event_cmp :: proc(ev1, ev2: EventID) -> bool {
+	return (
+	   ev1.pid == ev2.pid &&
+	   ev1.tid == ev2.tid &&
+	   ev1.did == ev2.did &&
+	   ev1.eid == ev2.eid
+	)
+}
+
 FunctionStats :: struct {
 	total_time: i64,
 	self_time: i64,
@@ -250,6 +261,7 @@ Trace :: struct {
 	stamp_scale: f64,
 
 	stats: Stats,
+	zoom_event: EventID,
 
 	error_message: string,
 	error_storage: [4096]u8,
