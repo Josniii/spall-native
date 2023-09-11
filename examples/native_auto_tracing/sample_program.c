@@ -2,10 +2,15 @@
 #include <stdio.h>
 #include <pthread.h>
 
+/*
+	This is a single header C library, but we pay a price for that simplicity.
+
+	The user must include the header to forward declare tracing functions wherever they get used, 
+	and then again once in their code with a #define (SPALL_AUTO_IMPLEMENTATION) to add function definitions
+*/
 #include "../../spall_native_auto.h"
 
-void bar(void) {
-}
+void bar(void) { }
 void foo(void) {
 	bar();
 }
@@ -26,7 +31,17 @@ void *run_work(void *ptr) {
 
 int main() {
 	spall_auto_init((char *)"profile.spall");
-	spall_auto_thread_init(0, SPALL_DEFAULT_BUFFER_SIZE);
+
+	/*
+		Ok, now init thread for main so we can trace from here out
+		spall_auto_thread_init takes a TID and a buffer size. Each thread can have its own buffer size,
+		if you have programs with slow, long running tasks that should flush regularly, 
+		you can shrink their buffers accordingly, or manually flush them.
+
+		Once thread_init runs, everything until the thread_quit is automatically logged to the trace file.
+	*/
+	int thread_id = 0;
+	spall_auto_thread_init(thread_id, SPALL_DEFAULT_BUFFER_SIZE);
 
 	pthread_t thread_1, thread_2;
 	pthread_create(&thread_1, NULL, run_work, NULL);
