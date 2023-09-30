@@ -8,6 +8,7 @@ import "core:time"
 import "core:runtime"
 import "core:path/filepath"
 import "core:mem"
+import "core:strings"
 
 import "formats:spall_fmt"
 
@@ -439,11 +440,26 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 			return false
 		}
 	} else if magic_chunk == MACH_MAGIC_64 {
-		ok := load_macho(trace, exec_buffer)
+		ok := load_macho_symbols(trace, exec_buffer)
 		if !ok {
 			post_error(trace, "Failed to parse Mach-O!")
 			return false
 		}
+
+		file_base := filepath.base(file_name)
+		b := strings.builder_make(context.temp_allocator)
+		strings.write_string(&b, file_name)
+		strings.write_string(&b, ".dSYM/Contents/Resources/DWARF/")
+		strings.write_string(&b, file_base)
+		
+		debug_file_name := strings.to_string(b)
+		debug_buffer, ok2 := os.read_entire_file_from_filename(debug_file_name)
+		if !ok2 {
+			post_error(trace, "No debug info found!")
+			return false
+		}
+
+		_ := load_macho_debug(trace, debug_buffer)
 	} else if bytes.equal(exec_buffer[:2], DOS_MAGIC) {
 		ok := load_pe32(trace, exec_buffer)
 		if !ok {

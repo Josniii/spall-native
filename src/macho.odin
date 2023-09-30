@@ -1,8 +1,14 @@
 package main
 
+import "core:fmt"
+import "core:strings"
+
 MACH_MAGIC_64 :: 0xfeedfacf
 
-MACH_CMD_SYMTAB :: 2
+MACH_CMD_SYMTAB      :: 0x2
+MACH_CMD_SEGMENT_64  :: 0x19
+MACH_FILETYPE_EXEC   :: 2
+MACH_FILETYPE_DSYM   :: 10
 Mach_Header_64 :: struct #packed {
 	magic:       u32,
 	cpu_type:    u32,
@@ -17,6 +23,35 @@ Mach_Header_64 :: struct #packed {
 Mach_Load_Command :: struct #packed {
 	type: u32,
 	size: u32,
+}
+
+Mach_Segment_64_Command :: struct #packed {
+	type:                u32,
+	size:                u32,
+	name:             [16]u8,
+	address:             u64,
+	mem_size:            u64,
+	file_offset:         u64,
+	file_size:           u64,
+	max_protection:      i32,
+	init_protection:     i32,
+	section_count:       u32,
+	flags:               u32,
+}
+
+Mach_Section :: struct #packed {
+	name:         [16]u8,
+	segment_name: [16]u8,
+	address:         u64,
+	size:            u64,
+	offset:          u32,
+	align:           u32,
+	reloc_offset:    u32,
+	reloc_count:     u32,
+	flags:           u32,
+	_rsv1:           u32,
+	_rsv2:           u32,
+	_rsv3:           u32,
 }
 
 Mach_Symtab_Command :: struct #packed {
@@ -36,13 +71,13 @@ Mach_Symbol_Entry_64 :: struct #packed {
 	value: u64,
 }
 
-load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
+load_macho_symbols :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	if len(exec_buffer) < size_of(Mach_Header_64) {
 		return false
 	}
 
 	header := slice_to_type(exec_buffer, Mach_Header_64) or_return
-	if header.file_type != 2 {
+	if header.file_type != MACH_FILETYPE_EXEC {
 		return false
 	}
 
@@ -98,5 +133,40 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	}
 
 	am_skew(&trace.addr_map, skew_size)
+	return true
+}
+
+load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
+	if len(exec_buffer) < size_of(Mach_Header_64) {
+		return false
+	}
+
+	header := slice_to_type(exec_buffer, Mach_Header_64) or_return
+	if header.file_type != MACH_FILETYPE_DSYM {
+		return false
+	}
+
+	read_idx := size_of(Mach_Header_64)
+	for read_idx < len(exec_buffer) {
+		current_buffer := exec_buffer[read_idx:]
+		cmd := slice_to_type(exec_buffer[read_idx:], Mach_Load_Command) or_return
+		if cmd.size == 0 {
+			return false
+		}
+
+		if cmd.type == MACH_CMD_SEGMENT_64 {
+			segment_header := slice_to_type(exec_buffer[read_idx:], Mach_Segment_64_Command) or_return
+			segment_name := strings.string_from_null_terminated_ptr(raw_data(segment_header.name[:]), 16)
+			if segment_name == "__DWARF" {
+				fmt.printf("%#v\n", segment_header)
+			}
+		}
+
+		read_idx += int(cmd.size)
+	}
+	if read_idx >= len(exec_buffer) {
+		return false
+	}
+
 	return true
 }
