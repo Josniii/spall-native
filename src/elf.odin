@@ -647,10 +647,13 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 	section_header_array_size := int(common_hdr.section_hdr_num) * int(common_hdr.section_entry_size)
 	section_header_blob := binary_blob[int(common_hdr.section_hdr_offset):int(common_hdr.section_hdr_offset)+section_header_array_size]
 
-	sym_section := []u8{}
-	str_section := []u8{}
-	line_section := []u8{}
-	linetable_section := []u8{}
+	sym_buffer := []u8{}
+	str_buffer := []u8{}
+
+	line_buffer := []u8{}
+	info_buffer := []u8{}
+	abbrev_buffer := []u8{}
+
 	for i := 0; i < section_header_array_size; i += int(common_hdr.section_entry_size) {
 		section_hdr, sk := parse_section_header(&ctx, section_header_blob[i:])
 		if !sk {
@@ -669,11 +672,15 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 		section_name := string(cstring(raw_data(section_name_blob)))
 		switch section_name {
 			case ".symtab": {
-				sym_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+				sym_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".strtab": {
-				str_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+				str_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_line": {
-				line_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+				line_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+			} case ".debug_info": {
+				info_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+			} case ".debug_abbrev": {
+				abbrev_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			}
 		}
 	}
@@ -682,8 +689,8 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 	skew_size : u64 = 0
 	symbol_found := false
 	sym_size := get_symbol_size(&ctx)
-	for i := 0; i < len(sym_section); i += sym_size {
-		symbol, ok := parse_symbol(&ctx, sym_section[i:])
+	for i := 0; i < len(sym_buffer); i += sym_size {
+		symbol, ok := parse_symbol(&ctx, sym_buffer[i:])
 		if !ok {
 			return false
 		}
@@ -693,7 +700,7 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 			continue
 		}
 
-		symbol_name := string(cstring(raw_data(str_section[symbol.name:])))
+		symbol_name := string(cstring(raw_data(str_buffer[symbol.name:])))
 		demangled_name, ok2 := demangle_symbol(symbol_name, tmp_buffer)
 		if !ok2 {
 			return false
@@ -710,5 +717,8 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 
 	am_skew(&trace.addr_map, skew_size)
 
-	return load_dwarf(trace, line_section)
+	// Start parsing DWARF normally from here
+	load_dwarf(trace, line_buffer, abbrev_buffer, info_buffer)
+
+	return true
 }

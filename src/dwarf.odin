@@ -103,22 +103,21 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 	}
 }
 
-load_dwarf :: proc(trace: ^Trace, line_section: []u8) -> bool {
-	if true do return true
-	for i := 0; i < len(line_section); {
-		unit_length := slice_to_type(line_section[i:], u32) or_return
+load_dwarf :: proc(trace: ^Trace, line_buffer, abbrev_buffer, info_buffer: []u8) -> bool {
+	for i := 0; i < len(line_buffer); {
+		unit_length := slice_to_type(line_buffer[i:], u32) or_return
 		if unit_length == 0xFFFF_FFFF { return false }
 		i += size_of(unit_length)
 
 		if unit_length == 0 { continue }
 
-		version := slice_to_type(line_section[i:], u16) or_return
+		version := slice_to_type(line_buffer[i:], u16) or_return
 		i += size_of(version)
 
 		ctx := DWARF_Context{}
 		ctx.bits_64 = false
 		ctx.version = int(version)
-		line_hdr, size := parse_line_header(&ctx, line_section[i:]) or_return
+		line_hdr, size := parse_line_header(&ctx, line_buffer[i:]) or_return
 		i += size
 
 		fmt.printf("version: %v\n", ctx.version)

@@ -514,3 +514,10 @@ slice_to_type :: proc(buf: []u8, $T: typeid) -> (T, bool) #optional_ok {
 disp_time :: proc(trace: ^Trace, ts: f64) -> f64 {
 	return ceil_f64(ts * trace.stamp_scale)
 }
+
+create_subbuffer :: proc(buffer: []u8, offset: u64, size: u64) -> ([]u8, bool) {
+	if offset > u64(len(buffer)) || offset+size > u64(len(buffer)) {
+		return nil, false
+	}
+	return buffer[offset:offset+size], true
+}
