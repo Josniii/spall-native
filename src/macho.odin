@@ -194,9 +194,10 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	abbrev_buffer := create_subbuffer(exec_buffer, u64(abbrev_section.offset), abbrev_section.size) or_return
 	info_buffer   := create_subbuffer(exec_buffer, u64(info_section.offset), info_section.size) or_return
 	line_buffer   := create_subbuffer(exec_buffer, u64(line_section.offset), line_section.size) or_return
+	line_str_buffer := []u8{}
 
 	// Start parsing DWARF normally from here
-	load_dwarf(trace, line_buffer, abbrev_buffer, info_buffer)
+	load_dwarf(trace, line_buffer, line_str_buffer, abbrev_buffer, info_buffer)
 
 	return true
 }

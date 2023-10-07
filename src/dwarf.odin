@@ -2,16 +2,64 @@ package main
 
 import "core:os"
 import "core:fmt"
+import "core:strings"
+
+Dw_Form :: enum {
+	addr           = 0x01,
+	block2         = 0x03,
+	block4         = 0x04,
+	data2          = 0x05,
+	data4          = 0x06,
+	data8          = 0x07,
+	str            = 0x08,
+	block          = 0x09,
+	block1         = 0x0a,
+	data1          = 0x0b,
+	flag           = 0x0c,
+	sdata          = 0x0d,
+	strp           = 0x0e,
+	udata          = 0x0f,
+	ref_addr       = 0x10,
+	ref1           = 0x11,
+	ref2           = 0x12,
+	ref4           = 0x13,
+	ref8           = 0x14,
+	ref_udata      = 0x15,
+	indirect       = 0x16,
+	sec_offset     = 0x17,
+	exprloc        = 0x18,
+	flag_present   = 0x19,
+
+	strx           = 0x1a,
+	ref_sup4       = 0x1c,
+	strp_sup       = 0x1d,
+	data16         = 0x1e,
+	line_strp      = 0x1f,
+	ref_sig8       = 0x20,
+	implicit_const = 0x21,
+	loclistx       = 0x22,
+	rnglistx       = 0x23,
+	ref_sup8       = 0x24,
+	strx1          = 0x25,
+	strx2          = 0x26,
+	strx3          = 0x27,
+	strx4          = 0x28,
+	addrx1         = 0x29,
+	addrx2         = 0x2a,
+	addrx3         = 0x2b,
+	addrx4         = 0x2c,
+}
 
 DWARF32_V5_Line_Header :: struct #packed {
-	address_size:          u8,
-	segment_selector_size: u8,
-	min_inst_length:       u8,
-	max_ops_per_inst:      u8,
-	default_is_stmt:       u8,
-	line_base:             i8,
-	line_range:            u8,
-	opcode_base:           u8,
+	address_size:           u8,
+	segment_selector_size:  u8,
+	header_length:         u32,
+	min_inst_length:        u8,
+	max_ops_per_inst:       u8,
+	default_is_stmt:        u8,
+	line_base:              i8,
+	line_range:             u8,
+	opcode_base:            u8,
 }
 
 DWARF32_V4_Line_Header :: struct #packed {
@@ -40,6 +88,14 @@ DWARF_Line_Header :: struct {
 	line_base:             i8,
 	line_range:            u8,
 	opcode_base:           u8,
+}
+
+Dw_LNCT :: enum u8 {
+	path            = 1,
+	directory_index = 2,
+	timestamp       = 3,
+	size            = 4,
+	md5             = 5,
 }
 
 DWARF_Context :: struct {
@@ -103,15 +159,46 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 	}
 }
 
-load_dwarf :: proc(trace: ^Trace, line_buffer, abbrev_buffer, info_buffer: []u8) -> bool {
+read_uleb :: proc(buffer: []u8) -> (u64, int, bool) {
+	val    : u64 = 0
+	offset := 0
+	size   := 1
+
+	for i := 0; i < 8; i += 1 {
+		b := buffer[i]
+
+		val = val | u64(b & 0x7F) << u64(offset * 7)
+		offset += 1
+
+		if b < 128 {
+			return val, size, true
+		}
+
+		size += 1
+	}
+
+	return 0, 0, false
+}
+
+load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, info_buffer: []u8) -> bool {
+	dir_table := make([dynamic]string)
+	append(&dir_table, ".")
+
 	for i := 0; i < len(line_buffer); {
 		unit_length := slice_to_type(line_buffer[i:], u32) or_return
-		if unit_length == 0xFFFF_FFFF { return false }
+		if unit_length == 0xFFFF_FFFF { 
+			fmt.printf("Only supporting DWARF32 for now!\n")
+			return false 
+		}
 		i += size_of(unit_length)
 
 		if unit_length == 0 { continue }
 
 		version := slice_to_type(line_buffer[i:], u16) or_return
+		if !(version == 3 || version == 4 || version == 5) {
+			fmt.printf("Only supports DWARF 3, 4 and 5, got %d\n", version)
+			return false
+		}
 		i += size_of(version)
 
 		ctx := DWARF_Context{}
@@ -120,9 +207,44 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, abbrev_buffer, info_buffer: []u8)
 		line_hdr, size := parse_line_header(&ctx, line_buffer[i:]) or_return
 		i += size
 
-		fmt.printf("version: %v\n", ctx.version)
-		fmt.printf("%#v\n", line_hdr)
-		if true { return false }
+		if line_hdr.opcode_base != 13 {
+			fmt.printf("Unable to support custom line table ops!\n")
+			return false
+		}
+
+		// this is fun
+		opcode_table_len := line_hdr.opcode_base - 1
+		i += int(opcode_table_len)
+
+		dir_entry_fmt_count := slice_to_type(line_buffer[i:], u8) or_return
+		i += size_of(dir_entry_fmt_count)
+
+		for j := 0; j < int(dir_entry_fmt_count); j += 1 {
+			content_type, size1 := read_uleb(line_buffer[i:]) or_return
+			i += size1
+
+			content_code := Dw_LNCT(content_type)
+
+			form_type, size2 := read_uleb(line_buffer[i:]) or_return
+			i += size2
+
+			form_code := Dw_Form(form_type)
+		}
+
+		dir_name_count, size2 := read_uleb(line_buffer[i:]) or_return
+		i += size2
+
+		for j := 0; j < int(dir_name_count); j += 1 {
+			str_idx := slice_to_type(line_buffer[i:], u32) or_return
+
+			cstr_dir_name := cstring(raw_data(line_str_buffer[str_idx:]))
+			dir_name := strings.clone_from_cstring(cstr_dir_name)
+			append(&dir_table, dir_name)
+
+			i += size_of(u32)
+		}
+
+		os.exit(0)
 	}
 
 	return false

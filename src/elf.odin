@@ -651,6 +651,7 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 	str_buffer := []u8{}
 
 	line_buffer := []u8{}
+	line_str_buffer := []u8{}
 	info_buffer := []u8{}
 	abbrev_buffer := []u8{}
 
@@ -672,15 +673,17 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 		section_name := string(cstring(raw_data(section_name_blob)))
 		switch section_name {
 			case ".symtab": {
-				sym_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				sym_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".strtab": {
-				str_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				str_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_line": {
-				line_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				line_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+			} case ".debug_line_str": {
+				line_str_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_info": {
-				info_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				info_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_abbrev": {
-				abbrev_buffer := create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				abbrev_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			}
 		}
 	}
@@ -718,7 +721,7 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 	am_skew(&trace.addr_map, skew_size)
 
 	// Start parsing DWARF normally from here
-	load_dwarf(trace, line_buffer, abbrev_buffer, info_buffer)
+	load_dwarf(trace, line_buffer, line_str_buffer, abbrev_buffer, info_buffer)
 
 	return true
 }
