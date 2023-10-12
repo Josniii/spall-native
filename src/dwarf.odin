@@ -58,10 +58,6 @@ Dw_LNCT :: enum u8 {
 	md5             = 5,
 }
 
-LineFmtEntry :: struct {
-	content: Dw_LNCT,
-	form: Dw_Form,
-}
 
 DWARF32_V5_Line_Header :: struct #packed {
 	address_size:           u8,
@@ -106,10 +102,19 @@ DWARF_Line_Header :: struct {
 	opcode_base:           u8,
 }
 
+LineFmtEntry :: struct {
+	content: Dw_LNCT,
+	form: Dw_Form,
+}
 
 File_Unit :: struct {
 	name:    string,
 	dir_idx:    int,
+}
+
+CU_Unit :: struct {
+	dir_table: [dynamic]string,
+	file_table: [dynamic]File_Unit,
 }
 
 Line_Machine :: struct {
@@ -233,13 +238,10 @@ read_uleb :: proc(buffer: []u8) -> (u64, int, bool) {
 }
 
 load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, info_buffer: []u8) -> bool {
-	dir_table  := make([dynamic]string)
-	file_table := make([dynamic]File_Unit)
-	line_tables := make([dynamic]Line_Table)
-	append(&dir_table, ".")
+	cu_list := make([dynamic]CU_Unit)
 
 	pass := 1
-	for i := 0; i < len(line_buffer); pass += 1{
+	for i := 0; i < len(line_buffer); pass += 1 {
 		fmt.printf("pass %v\n", pass)
 
 		cu_start := i
@@ -277,6 +279,10 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 		// this is fun
 		opcode_table_len := line_hdr.opcode_base - 1
 		i += int(opcode_table_len)
+
+		dir_table   := make([dynamic]string)
+		file_table  := make([dynamic]File_Unit)
+		line_tables := make([dynamic]Line_Table)
 
 		if version == 5 {
 			dir_entry_fmt_count := slice_to_type(line_buffer[i:], u8) or_return
@@ -410,6 +416,8 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 			i += rem_size
 
 		} else { // For DWARF 4, 3, 2, etc.
+			append(&dir_table, ".")
+
 			for {
 				cstr_dir_name := cstring(raw_data(line_buffer[i:]))
 
@@ -420,8 +428,6 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 
 				dir_name := strings.clone_from_cstring(cstr_dir_name)
 				append(&dir_table, dir_name)
-
-				fmt.printf("dir %s\n", dir_name)
 			}
 
 			for {
@@ -457,10 +463,21 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 			})
 			i += rem_size
 		}
+
+		append(&cu_list, CU_Unit{dir_table, file_table})
 	}
 
-	for file in file_table {
-		fmt.printf("%d | %s\n", file.dir_idx, file.name)
+	for cu, idx in cu_list {
+		fmt.printf("CU %d\n", idx)
+		base_path := cu.dir_table[0]
+		for file in cu.file_table {
+			dir_path := cu.dir_table[file.dir_idx]
+			if dir_path[0] != '/' {
+				fmt.printf("%s/%s/%s\n", base_path, cu.dir_table[file.dir_idx], file.name)
+			} else {
+				fmt.printf("%s/%s\n", cu.dir_table[file.dir_idx], file.name)
+			}
+		}
 	}
 
 	fmt.printf("success?\n")
