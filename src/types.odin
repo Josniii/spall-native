@@ -237,13 +237,13 @@ Stats :: struct {
 
 Line_Info :: struct {
 	address:  u64,
-	line_num: u32,
+	line_num: u64,
 	filename: string,
 }
 
 CU_File_Entry :: struct {
-	cu_idx: u32,
-	file_idx: u32,
+	cu_idx: u64,
+	file_idx: u64,
 }
 
 COLOR_CHOICES :: 32

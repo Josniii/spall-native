@@ -521,3 +521,49 @@ create_subbuffer :: proc(buffer: []u8, offset: u64, size: u64) -> ([]u8, bool) {
 	}
 	return buffer[offset:offset+size], true
 }
+
+read_uleb :: proc(buffer: []u8) -> (u64, int, bool) {
+	val    : u64 = 0
+	offset := 0
+	size   := 1
+
+	for i := 0; i < 8; i += 1 {
+		b := buffer[i]
+
+		val = val | u64(b & 0x7F) << u64(offset * 7)
+		offset += 1
+
+		if b < 128 {
+			return val, size, true
+		}
+
+		size += 1
+	}
+
+	return 0, 0, false
+}
+
+read_ileb :: proc(buffer: []u8) -> (i64, int, bool) {
+	val    : i64 = 0
+	offset := 0
+	size   := 1
+
+	for i := 0; i < 8; i += 1 {
+		b := buffer[i]
+
+		val = val | i64(b & 0x7F) << u64(offset * 7)
+		offset += 1
+
+		if b < 128 {
+			if (b & 0x40) == 0x40 {
+				val |= max(i64) << u64(offset * 7)
+			}
+
+			return val, size, true
+		}
+
+		size += 1
+	}
+
+	return 0, 0, false
+}

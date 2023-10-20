@@ -150,6 +150,7 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, skew_size: u64) -> bo
 	abbrev_section := Mach_Section{}
 	info_section   := Mach_Section{}
 	line_section   := Mach_Section{}
+	debug_str_section    := Mach_Section{}
 	found_debug := 0
 
 	read_idx := size_of(Mach_Header_64)
@@ -172,9 +173,10 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, skew_size: u64) -> bo
 					section_name := strings.string_from_null_terminated_ptr(raw_data(section.name[:]), 16)
 
 					switch section_name {
-					case "__debug_abbrev": abbrev_section = section; found_debug += 1
-					case "__debug_info":   info_section   = section; found_debug += 1
-					case "__debug_line":   line_section   = section; found_debug += 1
+					case "__debug_abbrev": abbrev_section    = section; found_debug += 1
+					case "__debug_info":   info_section      = section; found_debug += 1
+					case "__debug_line":   line_section      = section; found_debug += 1
+					case "__debug_str":    debug_str_section = section; found_debug += 1
 					}
 
 					sub_idx += size_of(Mach_Section)
@@ -192,13 +194,16 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, skew_size: u64) -> bo
 		return false
 	}
 
-	abbrev_buffer := create_subbuffer(exec_buffer, u64(abbrev_section.offset), abbrev_section.size) or_return
-	info_buffer   := create_subbuffer(exec_buffer, u64(info_section.offset), info_section.size) or_return
-	line_buffer   := create_subbuffer(exec_buffer, u64(line_section.offset), line_section.size) or_return
-	line_str_buffer := []u8{}
+	sections := Sections{}
+	sections.abbrev    = create_subbuffer(exec_buffer, u64(abbrev_section.offset), abbrev_section.size) or_return
+	sections.info      = create_subbuffer(exec_buffer, u64(info_section.offset), info_section.size) or_return
+	sections.line      = create_subbuffer(exec_buffer, u64(line_section.offset), line_section.size) or_return
+	sections.debug_str = create_subbuffer(exec_buffer, u64(debug_str_section.offset),  debug_str_section.size) or_return
 
 	// Start parsing DWARF normally from here
-	load_dwarf(trace, line_buffer, line_str_buffer, abbrev_buffer, info_buffer, skew_size)
+	if !load_dwarf(trace, &sections, skew_size) {
+		fmt.printf("DWARF parsing failed!\n")
+	}
 
 	return true
 }

@@ -649,11 +649,7 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 
 	sym_buffer := []u8{}
 	str_buffer := []u8{}
-
-	line_buffer := []u8{}
-	line_str_buffer := []u8{}
-	info_buffer := []u8{}
-	abbrev_buffer := []u8{}
+	sections := Sections{}
 
 	for i := 0; i < section_header_array_size; i += int(common_hdr.section_entry_size) {
 		section_hdr, sk := parse_section_header(&ctx, section_header_blob[i:])
@@ -677,13 +673,19 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 			} case ".strtab": {
 				str_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_line": {
-				line_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				sections.line = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+			} case ".debug_str": {
+				sections.debug_str = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+			} case ".debug_str_offsets": {
+				sections.str_offsets = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_line_str": {
-				line_str_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				sections.line_str = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_info": {
-				info_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				sections.info = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			} case ".debug_abbrev": {
-				abbrev_buffer = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+				sections.abbrev = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
+			} case ".debug_addr": {
+				sections.addr = create_subbuffer(binary_blob, section_hdr.offset, section_hdr.size) or_return
 			}
 		}
 	}
@@ -721,7 +723,9 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 	am_skew(&trace.addr_map, skew_size)
 
 	// Start parsing DWARF normally from here
-	load_dwarf(trace, line_buffer, line_str_buffer, abbrev_buffer, info_buffer, skew_size)
+	if !load_dwarf(trace, &sections, skew_size) {
+		fmt.printf("DWARF parsing failed!\n")
+	}
 
 	return true
 }

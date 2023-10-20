@@ -679,7 +679,7 @@ ev_name :: proc(trace: ^Trace, ev: ^Event) -> string {
 	return in_getstr(&trace.string_block, name_idx)
 }
 
-get_line_info :: proc(trace: ^Trace, addr: u64) -> (string, u32, bool) {
+get_line_info :: proc(trace: ^Trace, addr: u64) -> (string, u64, bool) {
 	if len(trace.line_info) == 0 {
 		return "", 0, false
 	}
