@@ -83,6 +83,7 @@ Dw_Line :: enum u8 {
 }
 
 Dw_Unit_Type :: enum u8 {
+	none          = 0x0,
 	compile       = 0x01,
 	type          = 0x02,
 	partial       = 0x03,
@@ -334,8 +335,8 @@ DWARF32_V3_CU_Header :: struct #packed {
 }
 
 DWARF32_V4_CU_Header :: struct #packed {
-	address_size: u8,
 	abbrev_offset: u32,
+	address_size: u8,
 }
 
 DWARF32_V5_CU_Header :: struct #packed {
@@ -405,6 +406,7 @@ Attr_Data :: union {
 	u16,
 	u8,
 	string,
+	cstring,
 	bool,
 }
 
@@ -415,7 +417,7 @@ Attr_Entry :: struct {
 
 Abbrev_Unit :: struct {
 	id: u64,
-	cu_idx: int,
+	offset: u64,
 	type: Dw_Tag,
 
 	has_children: bool,
@@ -552,31 +554,31 @@ parse_cu_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_CU_Header, in
 parse_attr_data :: proc(form: Dw_Form, data, abbrev_buffer, str_buffer, str_offsets_buffer, line_str_buffer: []u8) -> (entry: Attr_Data, size: int, ok: bool) {
 	#partial switch form {
 	case Dw_Form.str:
-		str := strings.clone_from_cstring(cstring(raw_data(data)))
+		str := cstring(raw_data(data))
 
 		return Attr_Data(str), len(str)+1, true
 	case Dw_Form.strp:
 		str_off := slice_to_type(data, u32) or_return
-		str := strings.clone_from_cstring(cstring(raw_data(str_buffer[str_off:])))
+		str := cstring(raw_data(str_buffer[str_off:]))
 
 		return Attr_Data(str), size_of(str_off), true
 	case Dw_Form.line_strp:
 		str_off := slice_to_type(data, u32) or_return
-		str := strings.clone_from_cstring(cstring(raw_data(line_str_buffer[str_off:])))
+		str := cstring(raw_data(line_str_buffer[str_off:]))
 
 		return Attr_Data(str), size_of(str_off), true
 	case Dw_Form.strx1:
 		str_off_idx := slice_to_type(data, u8) or_return
 		str_off_off := str_off_idx * size_of(u32)
 		str_off := slice_to_type(str_offsets_buffer[str_off_off:], u32) or_return
-		str := strings.clone_from_cstring(cstring(raw_data(str_buffer[str_off:])))
+		str := cstring(raw_data(str_buffer[str_off:]))
 
 		return Attr_Data(str), size_of(str_off_off), true
 	case Dw_Form.strx2:
 		str_off_idx := slice_to_type(data, u16) or_return
 		str_off_off := str_off_idx * size_of(u32)
 		str_off := slice_to_type(str_offsets_buffer[str_off_off:], u32) or_return
-		str := strings.clone_from_cstring(cstring(raw_data(str_buffer[str_off:])))
+		str := cstring(raw_data(str_buffer[str_off:]))
 
 		return Attr_Data(str), size_of(str_off_off), true
 	case Dw_Form.loclistx:
@@ -600,6 +602,9 @@ parse_attr_data :: proc(form: Dw_Form, data, abbrev_buffer, str_buffer, str_offs
 	case Dw_Form.addr:
 		addr := slice_to_type(data, u64) or_return
 
+		return Attr_Data(addr), size_of(addr), true
+	case Dw_Form.ref_addr:
+		addr := slice_to_type(data, u32) or_return
 		return Attr_Data(addr), size_of(addr), true
 	case Dw_Form.block1:
 		length := slice_to_type(data, u8) or_return
@@ -1147,15 +1152,10 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 
 	// chunk through all abbreviations
 	cu_start := 0
-	cu_idx := 0
 
-	abbrevs := make([dynamic]Abbrev_Unit)
-
-	AU_ID_Map :: map[u64]int
-	cu_au_list := make([dynamic]AU_ID_Map)
-
-	null_entry := make(AU_ID_Map)
-	append(&cu_au_list, null_entry)
+	au_offset_map := make(map[int][dynamic]Abbrev_Unit)
+	au_offset_map[0] = make([dynamic]Abbrev_Unit)
+	abbrevs := &au_offset_map[cu_start]
 
 	fmt.printf("DWARF: parsing debug_abbrev\n")
 	for i := 0; i < len(sections.abbrev); {
@@ -1168,16 +1168,14 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		// got a NULL abbrev
 		if abbrev_code == 0 {
 			cu_start = i
-			cu_idx += 1
 
-			id_map := make(AU_ID_Map)
-			append(&cu_au_list, id_map)
+			au_offset_map[cu_start] = make([dynamic]Abbrev_Unit)
+			abbrevs = &au_offset_map[cu_start]
 			continue
 		}
 
 		entry := Abbrev_Unit{}
 		entry.id = abbrev_code
-		entry.cu_idx = cu_idx
 
 		entry_type, size2, ok2 := read_uleb(sections.abbrev[i:])
 		if !ok2 {
@@ -1220,16 +1218,13 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 
 		entry.attrs_buf = sections.abbrev[attrs_start:i]
-
-		cu_au_list[cu_idx][entry.id] = len(abbrevs)
-		append(&abbrevs, entry)
+		append(abbrevs, entry)
 	}
 
 	MAX_BLOCK_STACK :: 30
 	entry_stack := [MAX_BLOCK_STACK]int{}
 
 	blocks := make([dynamic]Block)
-	au_offset_lookup := make(map[u32]int)
 
 	head_block := Block{}
 	head_block.type = Dw_Tag.program
@@ -1244,7 +1239,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 	// Process the CUs using the abbrev data
 	fmt.printf("DWARF: parsing debug_info\n")
 	for i := 0; i < len(sections.info); {
-
 		unit_length, ok := slice_to_type(sections.info[i:], u32)
 		if !ok {
 			panic("%s\n", #location())
@@ -1266,6 +1260,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 		i += size_of(version)
 
+
 		ctx := DWARF_Context{}
 		ctx.bits_64 = false
 		ctx.version = int(version)
@@ -1277,13 +1272,16 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		i += size
 
 		if cu_hdr.address_size != 8 {
-			fmt.printf("Doesn't support address size other than 8!\n", cu_hdr.address_size)
+			fmt.printf("Doesn't support address size other than 8! %v\n", cu_hdr.address_size)
 			return false
 		}
+
+		fmt.printf("0x%x, %v, %v\n", unit_length, version, cu_hdr)
 
 		child_level := 1
 		first_entry := true
 
+		abbrevs := &au_offset_map[int(cu_hdr.abbrev_offset)]
 		for first_entry || child_level > 1 {
 			first_entry = false
 
@@ -1298,9 +1296,9 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 				continue
 			}
 
-			abbrev_idx, ok2 := cu_au_list[cur_cu_idx][abbrev_id]
-			if !ok2 {
-				fmt.printf("tried to get %v, %v\n", cur_cu_idx, abbrev_id)
+			abbrev_idx := abbrev_id - 1
+			if abbrev_idx < 0 || abbrev_idx >= u64(len(abbrevs)) {
+				fmt.printf("tried to get invalid abbrev id: %v\n", abbrev_idx)
 				panic("%s\n", #location())
 			}
 			au := &abbrevs[abbrev_idx]
@@ -1311,9 +1309,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			block.parent_idx = entry_stack[child_level - 1]
 			block.au_offset = i - size
 			block.cu_offset = cur_cu_offset
-			//fmt.printf("%d | %v\n", abbrev_id, block.type)
-
-			au_offset_lookup[u32(block.au_offset)] = cur_block_id
+			fmt.printf("%x | %d | %v\n", block.au_offset, abbrev_id, block.type)
 
 			for j := 0; j < len(au.attrs_buf); {
 				attr_name, size, ok := read_uleb(au.attrs_buf[j:])
@@ -1341,7 +1337,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 
 				attr_field := Dw_At(attr_name)
 				attr_val := Attr_Entry{form = Dw_Form(attr_form), data = data}
-				//fmt.printf("\t%v (%v)\n", attr_field, attr_val)
+				fmt.printf("\t%v (%v)\n", attr_field, attr_val)
 				block.attrs[attr_field] = attr_val
 
 				// implicit const lives in the attr buffer, rather than in the .debug_info
@@ -1370,7 +1366,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 
 		cur_cu_idx += 1
-		cur_cu_offset = 1
+		cur_cu_offset = i
 	}
 
 	return true
