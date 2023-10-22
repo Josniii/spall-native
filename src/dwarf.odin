@@ -1128,11 +1128,11 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			append(&trace.line_info, Line_Info{line.address + skew_size, line.line_num, name})
 		}
 
-		line_order :: proc(a, b: Line_Info) -> bool {
-			return a.address < b.address
-		}
-		slice.sort_by(trace.line_info[:], line_order)
 	}
+	line_order :: proc(a, b: Line_Info) -> bool {
+		return a.address < b.address
+	}
+	slice.sort_by(trace.line_info[:], line_order)
 
 	// chunk through all abbreviations
 	cu_start := 0
