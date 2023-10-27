@@ -2,13 +2,13 @@
 #define SPALL_AUTO_H
 
 // THIS IS EXPERIMENTAL, BUT VERY HANDY
-// *should* work on clang/msvc on Windows, Mac, and Linux
+// *should* work on clang and gcc on Windows, Mac, and Linux
 
 #define SPALL_IS_WINDOWS 0
-#define SPALL_IS_MSVC    0
 #define SPALL_IS_DARWIN  0
 #define SPALL_IS_LINUX   0
 #define SPALL_IS_GCC     0
+#define SPALL_IS_CLANG   0
 #define SPALL_IS_CPP     0
 #define SPALL_IS_X64     0
 
@@ -17,13 +17,13 @@
 	#define SPALL_IS_CPP 1
 #endif
 
+#if defined(__clang__)
+    #undef SPALL_IS_CLANG
+    #define SPALL_IS_CLANG 1
+#endif
 #if defined(_WIN32)
     #undef SPALL_IS_WINDOWS
     #define SPALL_IS_WINDOWS 1
-    #if !defined(__clang__)
-        #undef SPALL_IS_MSVC
-        #define SPALL_IS_MSVC 1
-    #endif
 #elif defined(__APPLE__)
     #undef SPALL_IS_DARWIN
     #define SPALL_IS_DARWIN 1
@@ -40,6 +40,10 @@
 	#define SPALL_IS_X64 1
 #endif
 
+#if (!SPALL_IS_CLANG && !SPALL_IS_GCC)
+#error "Compiler not supported!"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,25 +57,9 @@ void spall_auto_quit(void);
 bool spall_auto_thread_init(uint32_t thread_id, size_t buffer_size);
 void spall_auto_thread_quit(void);
 
-#if SPALL_IS_MSVC
-    #ifndef _PROCESSTHREADSAPI_H_
-        extern __declspec(dllimport) int(__stdcall TlsSetValue)(unsigned long dwTlsIndex, void* lpTlsValue);
-    #endif
-
-    extern unsigned long spall_auto__tls_index; // DWORD
-    #define spall__thread_on() TlsSetValue(spall_auto__tls_index, (void *)1)
-    #define spall__thread_off() TlsSetValue(spall_auto__tls_index, (void *)0)
-    #define _Thread_local __declspec( thread )
-#else
 #if SPALL_IS_GCC && SPALL_IS_CPP
     #define _Thread_local thread_local
 #endif
-    #define spall__thread_off() 0
-    #define spall__thread_on() 0
-#endif
-
-#define spall_auto_thread_init(thread_id, buffer_size) (spall_auto_thread_init(thread_id, buffer_size), spall__thread_on())
-#define spall_auto_thread_quit() (spall__thread_off(), spall_auto_thread_quit())
 
 #define SPALL_DEFAULT_BUFFER_SIZE (128 * 1024 * 1024)
 
@@ -107,8 +95,6 @@ extern "C" {
     #include <pthread.h>
     #include <unistd.h>
     #include <errno.h>
-#elif SPALL_IS_MSVC
-    static DWORD spall_auto__tls_index = 0xFFFFFFFF;
 #endif
 
 #if SPALL_IS_WINDOWS
@@ -126,25 +112,17 @@ extern "C" {
     #define spall_thread_end(t)   pthread_join((t)->writer.thread, NULL)
 #endif
 
-#if SPALL_IS_MSVC
-    #define _CRT_SECURE_NO_WARNINGS
-    #define SPALL_NOINSTRUMENT // Can't noinstrument on MSVC!
-    #define SPALL_FORCEINLINE __forceinline
+#define SPALL_NOINSTRUMENT __attribute__((no_instrument_function))
+#define SPALL_FORCEINLINE __attribute__((always_inline))
+#define __debugbreak() __builtin_trap()
 
-    #define Spall_Atomic(X) volatile (X)
+#if SPALL_IS_CPP
+	#define Spall_Atomic(X) std::atomic<X>
 #else
-    #define SPALL_NOINSTRUMENT __attribute__((no_instrument_function))
-    #define SPALL_FORCEINLINE __attribute__((always_inline))
-    #define __debugbreak() __builtin_trap()
-
-    #if (SPALL_IS_GCC && SPALL_IS_CPP)
-        #define Spall_Atomic(X) std::atomic<X>
-    #else
-        #define Spall_Atomic(X) _Atomic (X)
-    #endif
+	#define Spall_Atomic(X) _Atomic (X)
 #endif
 
-#define SPALL_FN static inline SPALL_NOINSTRUMENT
+#define SPALL_FN static SPALL_NOINSTRUMENT
 #define SPALL_MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 #pragma pack(push, 1)
@@ -562,9 +540,6 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool (spall_auto_thread_init)(uint32_t thre
 }
 
 void (spall_auto_thread_quit)(void) {
-#if SPALL_IS_MSVC
-    TlsSetValue(spall_auto__tls_index, (void *)0);
-#endif
     spall_thread_running = false;
     spall_buffer_flush();
 
@@ -630,31 +605,15 @@ bool spall_auto_init(char *filename) {
 
     free(full_header);
 
-#if SPALL_IS_MSVC
-    if (spall_auto__tls_index == 0xFFFFFFFF) {
-        spall_auto__tls_index = TlsAlloc();
-    }
-#endif
-
     return true;
 }
 
-void spall_auto_quit(void) {
-#if SPALL_IS_MSVC
-    if (spall_auto__tls_index != 0xFFFFFFFF) {
-        TlsFree(spall_auto__tls_index);
-        spall_auto__tls_index = 0xFFFFFFFF;
-    }
-#endif
-}
+void spall_auto_quit(void) { }
 
 SPALL_NOINSTRUMENT void __cyg_profile_func_enter(void *fn, void *caller) {
     if (!spall_thread_running) {
         return;
     }
-#if SPALL_IS_MSVC
-    fn = ((char*)fn - 5);
-#endif
     fn = spall_canonical_addr(fn);
 
     spall_thread_running = false;
@@ -671,120 +630,6 @@ SPALL_NOINSTRUMENT void __cyg_profile_func_exit(void *fn, void *caller) {
     spall_buffer_micro_end();
     spall_thread_running = true;
 }
-
-#if SPALL_IS_MSVC
-    #define BE(_0,_1,_2,_3,_4,_5,_6,_7,NOTHING) \
-    ((uin ## NOTHING ## t64_t)(_7) << 56 | \
-        (uin ## NOTHING ## t64_t)(_6) << 48 | \
-        (uin ## NOTHING ## t64_t)(_5) << 40 | \
-        (uin ## NOTHING ## t64_t)(_4) << 32 | \
-        (uin ## NOTHING ## t64_t)(_3) << 24 | \
-        (uin ## NOTHING ## t64_t)(_2) << 16 | \
-        (uin ## NOTHING ## t64_t)(_1) <<  8 | \
-        (uin ## NOTHING ## t64_t)(_0) <<  0)
-
-    #define PHOOK_CAT__(a, b) a##b
-    #define PHOOK_CAT_(a, b) PHOOK_CAT__(a, b)
-    #define PHOOK_CAT(a, b) PHOOK_CAT_(a, b)
-    #define PHOOK_UNWRAP(...) __VA_ARGS__
-    #define PHOOK_IF_1(a, b) a
-    #define PHOOK_IF_0(a, b) b
-    #define PHOOK_IF(cond, a, b) PHOOK_CAT(PHOOK_IF_, cond)(PHOOK_UNWRAP a, PHOOK_UNWRAP b)
-    #define PHOOK(name, ENT, dest) \
-    __declspec(allocate(".text")) __declspec(dllexport) extern const uint64_t name[] = { \
-        BE( \
-            0x0F,0x1F,0x00,                                         /* nop */ \
-            0x9C,                                                   /* pushf */ \
-            0x50,                                                   /* push rax */ \
-            0x51,                                                   /* push rcx */ \
-            0x48,0xB8,                                              /* mov rax, spall_auto__tls_index */ \
-        ),(uint64_t)&spall_auto__tls_index,BE(                      /* abs64 relocation */ \
-            0x83,0x38,0xFF,                                         /* cmp qword ptr [rax], 0xFFFFFFFF */ \
-            0x75,0x04,                                              /* jne IS_PROFILING */ \
-            /* REENTRANT: */ \
-            0x59,                                                   /* pop rcx */ \
-            0x58,                                                   /* pop rax */ \
-            0x9D,                                                   /* popf */ \
-        ),BE( \
-            0xC3,                                                   /* ret */ \
-            /* IS_PROFILING: */ \
-            0x8B,0x08,                                              /* mov ecx, dword ptr [rax] */ \
-            /* check if we're already inside of penter, if so then don't call again */ \
-            0x65,0x48,0x8B,0x04,0x25,),BE(0x30,0x00,0x00,0x00,      /* mov rax, qword ptr gs:[0x30] */ \
-            0x48,0x8D,0x8C,0xC8,),BE(0x80,0x14,0x00,0x00,           /* lea rcx, [rax+rcx*8+0x1480] */ \
-            0x83,0x39,0x01,                                         /* cmp dword ptr [rcx], 1 */ \
-            0x75,),BE(0xE4,                                         /* jne REENTRANT */ \
-            0x49,0x50,                                              /* push r8 */ \
-            /* clone rsp into rdx and round down to 16 byte boundary to satisfy ABI */ \
-            0x52,                                                   /* push rdx */ \
-            0x48,0x89,0xE2,                                         /* mov rdx, rsp */ \
-            0x48,),BE(0x83,0xE4,0xF0,                               /* and rsp, 0xfffffffffffffff0 */ \
-            0xC6,0x01,0x00,                                         /* mov byte ptr [rcx], 0 */ \
-            0x48,0xB8,                                              /* mov rax, spall_auto_trace */ \
-        ),(uint64_t)dest,BE(                                        /* abs64 relocation */ \
-            0x52,                                                   /* push rdx */ \
-            0x49,0x51,                                              /* push r9 */ \
-            0x49,0x52,                                              /* push r10 */ \
-            0x49,0x53,                                              /* push r11 */ \
-            0x51,                                                   /* push rcx */ \
-        ),BE( \
-            0x48,0x81,0xEC,0x88,0x00,0x00,0x00,                     /* sub rsp, 0x88 */ \
-            0x0F,),BE(0x29,0x44,0x24,0x70,                          /* movaps xmmword ptr [rsp+0x70], xmm0 */ \
-            0x0F,0x29,0x4C,0x24,),BE(0x60,                          /* movaps xmmword ptr [rsp+0x60], xmm1 */ \
-            0x0F,0x29,0x54,0x24,0x50,                               /* movaps xmmword ptr [rsp+0x50], xmm2 */ \
-            0x0F,0x29,),BE(0x5C,0x24,0x40,                          /* movaps xmmword ptr [rsp+0x40], xmm3 */ \
-            0x0F,0x29,0x64,0x24,0x30,                               /* movaps xmmword ptr [rsp+0x30], xmm4 */ \
-        ), \
-        PHOOK_IF(ENT, (                                             /* if ENT */ \
-                BE( \
-                    0x0F,0x29,0x6C,0x24,0x20,                               /* movaps xmmword ptr [rsp+0x20], xmm5 */ \
-                    0x48,0x8B,0x4A,),BE(0x28,                               /* mov rcx, [rdx+0x28] */ \
-                    0xFF,0xD0,                                              /* call rax */ \
-                    0x0F,0x28,0x6C,0x24,0x20,                               /* movaps xmm3, xmmword ptr [rsp+0x20] */ \
-                ) \
-            ),(                                                         /* else */ \
-                BE( \
-                    0x0F,0x29,0x6C,0x24,0x20,                               /* movaps xmmword ptr [rsp+0x20], xmm5 */ \
-                    0x0F,0x1F,0x40,),BE(0x00,                               /* nop */ \
-                    0xFF,0xD0,                                              /* call rax */ \
-                    0x0F,0x28,0x6C,0x24,0x20,                               /* movaps xmm3, xmmword ptr [rsp+0x20] */ \
-                ) \
-            )),                                                         /* endif */ \
-        BE( \
-            0x0F,0x28,0x64,0x24,0x30,                               /* movaps xmm3, xmmword ptr [rsp+0x30] */ \
-            0x0F,0x28,0x5C,),BE(0x24,0x40,                          /* movaps xmm3, xmmword ptr [rsp+0x40] */ \
-            0x0F,0x28,0x54,0x24,0x50,                               /* movaps xmm2, xmmword ptr [rsp+0x50] */ \
-            0x0F,),BE(0x28,0x4C,0x24,0x60,                          /* movaps xmm1, xmmword ptr [rsp+0x60] */ \
-            0x0F,0x28,0x44,0x24,),BE(0x70,                          /* movaps xmm0, xmmword ptr [rsp+0x70] */ \
-            0x48,0x81,0xC4,0x88,0x00,0x00,0x00,                     /* add rsp, 0x88 */ \
-        ),BE( \
-            0x59,                                                   /* pop rcx */ \
-            0xC6,0x01,0x01,                                         /* mov byte ptr [rcx], 1 */ \
-            0x49,0x5B,                                              /* pop r11 */ \
-            0x49,0x5A,                                              /* pop r10 */ \
-        ),BE( \
-            0x49,0x59,                                              /* pop r9 */ \
-            0x5C,                                                   /* pop rsp */ \
-            0x5A,                                                   /* pop rdx */ \
-            0x49,0x58,                                              /* pop r8 */ \
-            0x59,                                                   /* pop rcx */ \
-            0x58,                                                   /* pop rax */ \
-        ),BE( \
-            0x9D,                                                   /* popf */ \
-            0xC3,                                                   /* ret */ \
-            0xCC,                                                   /* int3 */ \
-            0xCC,                                                   /* int3 */ \
-            0xCC,                                                   /* int3 */ \
-            0xCC,                                                   /* int3 */ \
-            0xCC,                                                   /* int3 */ \
-            0xCC,                                                   /* int3 */ \
-        ), \
-    };
-
-    #pragma code_seg(".text")
-    PHOOK(_penter, 1, __cyg_profile_func_enter);
-    PHOOK(_pexit, 0, __cyg_profile_func_exit);
-#endif
 
 #ifdef __cplusplus
 }
