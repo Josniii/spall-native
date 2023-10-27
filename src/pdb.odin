@@ -4,6 +4,8 @@ import "core:bytes"
 import "core:slice"
 import "core:math"
 import "core:mem"
+import "core:strings"
+import "core:fmt"
 
 // PDB is complete nonsense. 
 // At the bottom of the PDB header is an array of offsets. The array of offsets get you blocks, containing offsets.
@@ -101,6 +103,8 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 	skew_size : u64 = 0
 	symbol_found := false
 
+	strings.intern_init(&trace.filename_map)
+
 	mod_offset := size_of(PDB_DBI_Header)
 	last_mod_info := int(dbi_hdr.mod_info_size) + size_of(PDB_DBI_Header)
 	for ; mod_offset < last_mod_info; {
@@ -159,41 +163,14 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 		cur_offset += int(mod_info_hdr.c11_size)
 		cur_start := cur_offset
 
+		// Find the checksums
 		checksum_pile: []u8
-		line_count := 0
 		for ; cur_offset < cur_end; {
 			dbg_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Debug_Subsection_Header)
 			cur_offset += size_of(PDB_Debug_Subsection_Header)
 			end_offset := cur_offset + int(dbg_hdr.length)
 
 			#partial switch dbg_hdr.type {
-				case .Lines: {
-					lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_Header)
-					cur_offset += size_of(PDB_Line_Header)
-
-					for lfb_count := 0; cur_offset < end_offset; lfb_count += 1 {
-						lfb_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_File_Block_Header) or_return
-						lfb_end_offset := cur_offset + int(lfb_hdr.size)
-
-						cur_offset += size_of(PDB_Line_File_Block_Header)
-						for i := 0; i < int(lfb_hdr.line_count); i += 1 {
-							line := slice_to_type(symbol_stream[cur_offset:], PDB_Line) or_return
-							line_count += 1
-							cur_offset += size_of(PDB_Line)
-						}
-
-						cur_offset = lfb_end_offset
-					}
-				}
-				case .InlineLines: {
-					inline_lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line_Header)
-					#partial switch inline_lines_hdr.type {
-						case .Signature: {
-							inline_lines := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line)
-							line_count += 1
-						}
-					}
-				}
 				case .FileChecksums: {
 					checksum_pile = symbol_stream[cur_offset:]
 				}
@@ -203,7 +180,6 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 		}
 
 		cur_offset = cur_start
-		//lines := make([dynamic]Line, 0, line_count)
 		for ; cur_offset < cur_end; {
 			dbg_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Debug_Subsection_Header)
 			cur_offset += size_of(PDB_Debug_Subsection_Header)
@@ -228,15 +204,12 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 
 							checksum_hdr := slice_to_type(checksum_pile[checksum_offset:], PDB_File_Checksum_Header) or_return
 							file_name := string(cstring(raw_data(name_stream_strings[checksum_hdr.filename_offset:])))
+							interned_name, err := strings.intern_get(&trace.filename_map, file_name)
+							if err != nil {
+								panic("Out of Memory!\n")
+							}
 
-							/*
-							append(&lines, Line{
-								file_idx = u32(checksum_offset),
-								address = line_addr + u64(line.offset),
-								number = line_num,
-								inline = false,
-							})
-							*/
+							append(&trace.line_info, Line_Info{line_addr + u64(line.offset) + skew_size, u64(line_num), interned_name})
 							cur_offset += size_of(PDB_Line)
 						}
 
