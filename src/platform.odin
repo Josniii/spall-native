@@ -104,8 +104,9 @@ draw_rect_inline :: proc(rects: ^[dynamic]DrawRect, rect: Rect, width: f64, colo
 
 set_cursor :: proc(type: string) {
 	switch type {
-	case "auto": SDL.SetCursor(default_cursor)
+	case "auto":    SDL.SetCursor(default_cursor)
 	case "pointer": SDL.SetCursor(pointer_cursor)
+	case "text":    SDL.SetCursor(text_cursor)
 	}
 	is_hovering = true
 }
@@ -208,7 +209,7 @@ batch_text :: proc(text_rects: ^[dynamic]TextRect, str: string, pos: Vec2, scale
 	x_pos := f32(math.round(pos.x))
 	y_pos := f32(math.round(pos.y))
 	append(text_rects, TextRect{
-		str = strings.clone(str),
+		str = str,
 		scale = scale,
 		type = font_type,
 		pos = FVec2{x_pos, y_pos},
@@ -226,7 +227,6 @@ flush_text_batch :: proc(text_rects: ^[dynamic]TextRect) {
 		draw_rect := DrawRect{FVec4{rect.pos.x, rect.pos.y, w, h}, rect.color, FVec2{0.0, 0.0}}
 		gl.BufferData(gl.ARRAY_BUFFER, size_of(draw_rect), &draw_rect, gl.DYNAMIC_DRAW)
 		gl.DrawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, 1)
-		delete(rect.str)
 	}
 
 	resize(text_rects, 0)

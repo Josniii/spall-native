@@ -19,6 +19,24 @@ Rect :: struct {
 	h: f64,
 }
 
+TextboxState :: struct {
+	focus: bool,
+	cursor: int,
+	b: strings.Builder,
+}
+
+TextboxKind :: enum u8 {
+	ProgramInput = 1,
+}
+
+init_textbox_state :: proc() -> TextboxState {
+	return TextboxState{
+		focus = false,
+		cursor = 0,
+		b = strings.builder_make(),
+	}
+}
+
 UIMode :: enum {
 	MainMenu,
 	TraceView,
@@ -69,6 +87,8 @@ UIState :: struct {
 	post_loading: bool,
 
 	ui_mode: UIMode,
+
+	textboxes: map[TextboxKind]TextboxState,
 }
 
 DrawRect :: struct #packed {

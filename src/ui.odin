@@ -286,6 +286,93 @@ draw_graph :: proc(rects: ^[dynamic]DrawRect, header: string, history: ^queue.Qu
 	}
 }
 
+draw_reduced_header :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {
+	header_rect := ui_state.header_rect
+	full_flamegraph_rect := ui_state.full_flamegraph_rect
+
+	// Render toolbar background
+	draw_rect(rects, header_rect, toolbar_color)
+
+	// draw toolbar
+	{
+		edge_pad := 1 * em
+		button_height := 2 * em
+		button_width  := 2 * em
+		button_pad    := 0.5 * em
+
+		cursor_x := edge_pad
+
+		// Draw Logo
+		logo_text := "spall"
+		logo_width := measure_text(logo_text, .H1Size, .DefaultFont)
+		draw_text(rects, logo_text, Vec2{cursor_x, (header_rect.h / 2) - (h1_height / 2)}, .H1Size, .DefaultFont, toolbar_text_color)
+		cursor_x += logo_width + edge_pad
+
+		// Open File
+		if button(rects, Rect{cursor_x, (header_rect.h / 2) - (button_height / 2), button_width, button_height}, "\uf07c", "open file", .IconFont, 0, ui_state.width) {
+			filename, ok := open_file_dialog()
+			if ok {
+				ui_state.ui_mode = .TraceView
+				start_trace = filename
+				load_config(&global_pool, trace, ui_state)
+			}
+		}
+		cursor_x += button_width + button_pad
+
+		file_name_width := measure_text(trace.base_name, .H1Size, .DefaultFont)
+		name_x := max((full_flamegraph_rect.w / 2) - (file_name_width / 2), cursor_x)
+		draw_text(rects, trace.base_name, Vec2{name_x, (header_rect.h / 2) - (h1_height / 2)}, .H1Size, .DefaultFont, toolbar_text_color)
+
+		// colormode button nonsense
+		color_text : string
+		tool_text : string
+		switch colormode {
+			case .Auto:
+			tool_text = "switch to dark colors"
+			color_text = "\uf042"
+			case .Dark:
+			tool_text = "switch to light colors"
+			color_text = "\uf10c"
+			case .Light:
+			tool_text = "switch to auto colors"
+			color_text = "\uf111"
+		}
+
+		if button(rects, Rect{
+			ui_state.width - edge_pad - button_width, 
+			(header_rect.h / 2) - (button_height / 2), 
+			button_width,
+			button_height,
+		}, color_text, tool_text, .IconFont, 0, ui_state.width) {
+			new_colormode: ColorMode
+
+			// rotate between auto, dark, and light
+			switch colormode {
+				case .Auto:
+				new_colormode = .Dark
+				case .Dark:
+				new_colormode = .Light
+				case .Light:
+				new_colormode = .Auto
+			}
+
+			switch new_colormode {
+				case .Auto:
+				is_dark := get_system_color()
+				set_color_mode(true, is_dark)
+				set_session_storage("colormode", "auto")
+				case .Dark:
+				set_color_mode(false, true)
+				set_session_storage("colormode", "dark")
+				case .Light:
+				set_color_mode(false, false)
+				set_session_storage("colormode", "light")
+			}
+			colormode = new_colormode
+		}
+	}
+}
+
 draw_header :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {
 	header_rect := ui_state.header_rect
 	full_flamegraph_rect := ui_state.full_flamegraph_rect
@@ -2224,54 +2311,6 @@ draw_trace :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, tr
 			trace.stats.released_event = empty_event
 		}
 
-		spall_x_pad     := 3 * em
-		header_height   := 3 * em
-		activity_height := 2 * em
-		timebar_height  := 3 * em
-		rect_height     := em + (0.75 * em)
-		top_line_gap    := (em / 1.5)
-
-		topbars_height    := header_height + timebar_height + activity_height
-		minigraph_width   := 15 * em
-		flamegraph_width  := ui_state.width - (spall_x_pad + minigraph_width)
-		flamegraph_height := ui_state.height - topbars_height - ui_state.info_pane_height
-
-		tab_select_height := 2 * em
-		filter_pane_width := ui_state.filters_open ? (15 * em) : 0
-		stats_pane_x := filter_pane_width
-
-		ui_state.side_pad                  = spall_x_pad
-		ui_state.rect_height               = rect_height
-		ui_state.topbars_height            = topbars_height
-		ui_state.top_line_gap              = top_line_gap
-		ui_state.flamegraph_toptext_height = (ui_state.top_line_gap * 2) + (2 * em)
-		ui_state.flamegraph_header_height  = ui_state.flamegraph_toptext_height + em
-
-		ui_state.header_rect             = Rect{0, 0, ui_state.width, header_height}
-		ui_state.global_timebar_rect     = Rect{0, header_height, ui_state.width, timebar_height}
-		ui_state.global_activity_rect    = Rect{spall_x_pad, header_height + timebar_height, flamegraph_width, activity_height}
-		ui_state.local_timebar_rect      = Rect{spall_x_pad, header_height + timebar_height + activity_height, flamegraph_width, timebar_height}
-		ui_state.minimap_rect            = Rect{ui_state.width - minigraph_width, topbars_height, minigraph_width, flamegraph_height}
-
-		ui_state.info_pane_rect          = Rect{0, ui_state.height - ui_state.info_pane_height, ui_state.width, ui_state.info_pane_height}
-		ui_state.tab_rect                = Rect{0, ui_state.info_pane_rect.y, ui_state.width, tab_select_height}
-
-		pane_start_y := ui_state.tab_rect.y + ui_state.tab_rect.h
-
-		info_subpane_height := ui_state.info_pane_height - tab_select_height
-		ui_state.filter_pane_rect        = Rect{0, pane_start_y, filter_pane_width, info_subpane_height}
-		ui_state.stats_pane_rect         = Rect{stats_pane_x, pane_start_y, ui_state.width - stats_pane_x, info_subpane_height}
-
-		ui_state.full_flamegraph_rect    = Rect{spall_x_pad, topbars_height, flamegraph_width, flamegraph_height}
-
-		ui_state.inner_flamegraph_rect    = ui_state.full_flamegraph_rect
-		ui_state.inner_flamegraph_rect.y += ui_state.flamegraph_toptext_height
-		ui_state.inner_flamegraph_rect.h -= ui_state.flamegraph_toptext_height
-
-		ui_state.padded_flamegraph_rect    = ui_state.inner_flamegraph_rect
-		ui_state.padded_flamegraph_rect.y += em
-		ui_state.padded_flamegraph_rect.h -= em
-
 		if ui_state.post_loading {
 			if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 1000 }
 			ui_state.multiselecting = false
@@ -2301,8 +2340,8 @@ draw_trace :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, tr
 		draw_topbars(rects, trace, start_time, end_time, ui_state)
 
 		// draw sidelines
-		draw_line(rects, Vec2{ui_state.side_pad, header_height + timebar_height},       Vec2{ui_state.side_pad, ui_state.info_pane_rect.y}, 1, line_color)
-		draw_line(rects, Vec2{ui_state.minimap_rect.x, header_height + timebar_height}, Vec2{ui_state.minimap_rect.x, ui_state.info_pane_rect.y}, 1, line_color)
+		draw_line(rects, Vec2{ui_state.side_pad, ui_state.header_rect.h + ui_state.global_timebar_rect.h},       Vec2{ui_state.side_pad, ui_state.info_pane_rect.y}, 1, line_color)
+		draw_line(rects, Vec2{ui_state.minimap_rect.x, ui_state.header_rect.h + ui_state.global_timebar_rect.h}, Vec2{ui_state.minimap_rect.x, ui_state.info_pane_rect.y}, 1, line_color)
 
 		process_multiselect(rects, trace, pan_delta, dt, ui_state)
 		process_stats(trace, ui_state)
@@ -2315,11 +2354,6 @@ draw_trace :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, tr
 		}
 
 		draw_header(rects, trace, ui_state)
-
-		// reset the cursor if we're not over a selectable thing
-		if !is_hovering {
-			reset_cursor()
-		}
 
 		if enable_debug {
 			draw_debug(rects, ui_state)
@@ -2335,9 +2369,75 @@ draw_trace :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, tr
 		}
 }
 
-draw_main_menu :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, ui_state: ^UIState, dt: f64, window: ^SDL.Window) {
-	text := "Hello World!"
-	text_width := measure_text(text, .PSize, .DefaultFont)
-	text_x := (ui_state.width / 2) - (text_width / 2)
-	draw_text(rects, text, Vec2{text_x, ui_state.height / 2}, .PSize, .DefaultFont, text_color)
+draw_textbox :: proc(rects: ^[dynamic]DrawRect, pos: Rect, hint_text: string, state: ^TextboxState) {
+	p_height  := get_text_height(.PSize, .MonoFont)
+
+	if pt_in_rect(mouse_pos, pos) {
+		set_cursor("text")
+		if clicked {
+			state.focus = true
+		}
+	} else if clicked {
+		state.focus = false
+	}
+
+	draw_rect(rects, pos, bg_color)
+
+	box_outline_color := outline_color
+	if state.focus {
+		box_outline_color = toolbar_color
+	}
+	draw_rect_outline(rects, pos, 1,  box_outline_color)
+
+	text_x := pos.x + (em / 2)
+	text_y := pos.y + (em / 2)
+
+	cur_str := strings.to_string(state.b)
+	if strings.builder_len(state.b) == 0 && !state.focus {
+		draw_text(rects, hint_text, Vec2{text_x, text_y}, .PSize, .MonoFont, hint_text_color)
+	} else {
+		draw_text(rects, cur_str, Vec2{text_x, text_y}, .PSize, .MonoFont, text_color)
+	}
+
+	// Draw cursor
+	if state.focus {
+		b := strings.builder_make(context.temp_allocator)
+		for r, idx in cur_str {
+			if idx == state.cursor {
+				break
+			} else {
+				strings.write_rune(&b, r)
+			}
+		}
+		cursor_pos := measure_text(strings.to_string(b), .PSize, .MonoFont)
+		draw_line(rects, Vec2{text_x + cursor_pos, text_y}, Vec2{text_x + cursor_pos, text_y + p_height}, 1, text_color)
+	}
+}
+
+draw_main_menu :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState, dt: f64, window: ^SDL.Window) {
+	draw_reduced_header(rects, trace, ui_state)
+
+	menu_rect := Rect{0, ui_state.header_rect.h, ui_state.width, ui_state.height - ui_state.header_rect.h}
+	draw_rect(rects, menu_rect, bg_color)
+
+	p_height  := get_text_height(.PSize, .DefaultFont)
+	h1_height := get_text_height(.H1Size, .DefaultFont)
+
+	line_x := menu_rect.w / 3
+	line_y := (menu_rect.h / 3) + menu_rect.y
+	draw_text(rects, "Run", Vec2{line_x, next_line(&line_y, p_height)}, .H1Size, .DefaultFont, text_color)
+	draw_text(rects, "Launch and sample a program", Vec2{line_x, next_line(&line_y, h1_height)}, .PSize, .DefaultFont, subtext_color)
+
+	form_w := 30 * em
+	form_h := em + p_height
+	box := &ui_state.textboxes[.ProgramInput]
+	draw_textbox(rects, Rect{line_x, line_y, form_w, form_h}, "Path to Program...", box)
+
+	edge_pad := 0.5 * em
+	button_height := 2 * em
+	button_width  := 2 * em
+	button_rect := Rect{line_x + form_w + edge_pad, line_y, button_height, button_width}
+	if button(rects, button_rect, "\uf15b", "select program", .IconFont, menu_rect.x, menu_rect.w) {
+		fmt.printf("selecting executable!\n")
+	}
 }

@@ -11,6 +11,7 @@ import "core:runtime"
 import "core:slice"
 import "core:container/queue"
 import "core:container/lru"
+import "core:unicode/utf8"
 import "core:prof/spall"
 
 import glm "core:math/linalg/glsl"
@@ -28,6 +29,8 @@ double_clicked := false
 clicked_t      : time.Tick
 mouse_up_now   := false
 is_hovering    := false
+
+alt_down       := false
 shift_down     := false
 ctrl_down      := false
 
@@ -57,6 +60,7 @@ resort_stats := false
 colormode      := ColorMode.Dark
 default_cursor: ^SDL.Cursor
 pointer_cursor: ^SDL.Cursor
+text_cursor:    ^SDL.Cursor
 
 // font data
 dpr:       f64 = 1
@@ -261,7 +265,9 @@ main :: proc() {
 	ui_state := UIState{
 		ui_mode = .MainMenu,
 		post_loading = true,
+		textboxes = make(map[TextboxKind]TextboxState),
 	}
+	ui_state.textboxes[.ProgramInput] = init_textbox_state()
 
 	// If the user passed us a trace, save off the filename now
 	if len(os.args) == 2 {
@@ -327,6 +333,7 @@ main :: proc() {
 
 	default_cursor = SDL.CreateSystemCursor(.ARROW)
 	pointer_cursor = SDL.CreateSystemCursor(.HAND)
+	text_cursor    = SDL.CreateSystemCursor(.IBEAM)
 
 	gl_context := SDL.GL_CreateContext(window)
 	if gl_context == nil {
@@ -483,6 +490,24 @@ main :: proc() {
 
 		should_toggle_fullscreen := false
 
+		// if any of the textboxes are in focus, enable keyboard capture
+		capture_text := false
+		selected_box_id: TextboxKind
+		selected_box: ^TextboxState = nil
+		for id, box in &ui_state.textboxes {
+			if box.focus {
+				capture_text = true
+				selected_box_id = id
+				break
+			}
+		}
+		if capture_text {
+			SDL.StartTextInput()
+			selected_box = &ui_state.textboxes[selected_box_id]
+		} else {
+			SDL.StopTextInput()
+		}
+
 		// event polling
 		event: SDL.Event = ---
 		event_loop: for {
@@ -505,29 +530,47 @@ main :: proc() {
 			case .QUIT:
 				break main_loop
 			case .KEYDOWN:
+				alt_down   = (event.key.keysym.mod & SDL.KMOD_ALT) != SDL.Keymod{}
+				shift_down = (event.key.keysym.mod & SDL.KMOD_SHIFT) != SDL.Keymod{}
+				ctrl_down  = (event.key.keysym.mod & SDL.KMOD_CTRL) != SDL.Keymod{}
+
 				#partial switch event.key.keysym.sym {
-				case .LSHIFT: fallthrough
-				case .RSHIFT:
-					shift_down = true
-				case .LCTRL: fallthrough
-				case .RCTRL:
-					ctrl_down = true
 				case .RETURN:
-					if event.key.keysym.mod & SDL.KMOD_ALT != (SDL.Keymod{}) {
+					if alt_down {
 						should_toggle_fullscreen = true
 					}
 				case .F11:
 					should_toggle_fullscreen = true
+				case .BACKSPACE:
+					if capture_text {
+						cur_str := strings.to_string(selected_box.b)
+						r_len := utf8.rune_count_in_string(cur_str)
+
+						if selected_box.cursor == r_len {
+							strings.pop_rune(&selected_box.b)
+							selected_box.cursor = max(0, selected_box.cursor - 1)
+						} else {
+							if selected_box.cursor > 0 {
+								selected_box.cursor -= 1
+								remove_range(&selected_box.b.buf, selected_box.cursor, selected_box.cursor + 1)
+							}
+						}
+					}
+				case .LEFT:
+					if capture_text {
+						selected_box.cursor = max(0, selected_box.cursor - 1)
+					}
+				case .RIGHT:
+					if capture_text {
+						cur_str := strings.to_string(selected_box.b)
+						r_len := utf8.rune_count_in_string(cur_str)
+						selected_box.cursor = min(r_len, selected_box.cursor + 1)
+					}
 				}
 			case .KEYUP:
-				#partial switch event.key.keysym.sym {
-				case .LSHIFT: fallthrough
-				case .RSHIFT:
-					shift_down = false
-				case .LCTRL: fallthrough
-				case .RCTRL:
-					ctrl_down = false
-				}
+				alt_down   = (event.key.keysym.mod & SDL.KMOD_ALT) != SDL.Keymod{}
+				shift_down = (event.key.keysym.mod & SDL.KMOD_SHIFT) != SDL.Keymod{}
+				ctrl_down  = (event.key.keysym.mod & SDL.KMOD_CTRL) != SDL.Keymod{}
 			case .MOUSEMOTION:
 				x := f64(event.motion.x)
 				y := f64(event.motion.y)
@@ -574,7 +617,25 @@ main :: proc() {
 				}
 			case .DROPFILE:
 				start_trace = strings.clone_from_cstring(event.drop.file)
+				ui_state.ui_mode = .TraceView
+				fmt.printf("start trace: %s\n", start_trace)
 				SDL.free(rawptr(event.drop.file))
+			case .DROPTEXT:
+				SDL.free(rawptr(event.drop.file))
+			case .TEXTINPUT:
+				if capture_text {
+					cur_str := strings.to_string(selected_box.b)
+					r_len := utf8.rune_count_in_string(cur_str)
+
+					new_rune := string(cstring(rawptr(&event.text.text)))
+					if selected_box.cursor == r_len {
+						strings.write_string(&selected_box.b, new_rune)
+						selected_box.cursor += 1
+					} else {
+						inject_at(&selected_box.b.buf, selected_box.cursor, new_rune)
+						selected_box.cursor += 1
+					}
+				}
 			}
 		}
 
@@ -613,9 +674,62 @@ main :: proc() {
 		ui_state.height = height / dpr
 		ui_state.width  = width / dpr
 
+		header_height   := 3 * em
+		spall_x_pad     := 3 * em
+		activity_height := 2 * em
+		timebar_height  := 3 * em
+		rect_height     := em + (0.75 * em)
+		top_line_gap    := (em / 1.5)
+
+		topbars_height    := header_height + timebar_height + activity_height
+		minigraph_width   := 15 * em
+		flamegraph_width  := ui_state.width - (spall_x_pad + minigraph_width)
+		flamegraph_height := ui_state.height - topbars_height - ui_state.info_pane_height
+
+		tab_select_height := 2 * em
+		filter_pane_width := ui_state.filters_open ? (15 * em) : 0
+		stats_pane_x := filter_pane_width
+
+		ui_state.side_pad                  = spall_x_pad
+		ui_state.rect_height               = rect_height
+		ui_state.topbars_height            = topbars_height
+		ui_state.top_line_gap              = top_line_gap
+		ui_state.flamegraph_toptext_height = (ui_state.top_line_gap * 2) + (2 * em)
+		ui_state.flamegraph_header_height  = ui_state.flamegraph_toptext_height + em
+
+		ui_state.header_rect             = Rect{0, 0, ui_state.width, header_height}
+		ui_state.global_timebar_rect     = Rect{0, header_height, ui_state.width, timebar_height}
+		ui_state.global_activity_rect    = Rect{spall_x_pad, header_height + timebar_height, flamegraph_width, activity_height}
+		ui_state.local_timebar_rect      = Rect{spall_x_pad, header_height + timebar_height + activity_height, flamegraph_width, timebar_height}
+		ui_state.minimap_rect            = Rect{ui_state.width - minigraph_width, topbars_height, minigraph_width, flamegraph_height}
+
+		ui_state.info_pane_rect          = Rect{0, ui_state.height - ui_state.info_pane_height, ui_state.width, ui_state.info_pane_height}
+		ui_state.tab_rect                = Rect{0, ui_state.info_pane_rect.y, ui_state.width, tab_select_height}
+
+		pane_start_y := ui_state.tab_rect.y + ui_state.tab_rect.h
+
+		info_subpane_height := ui_state.info_pane_height - tab_select_height
+		ui_state.filter_pane_rect        = Rect{0, pane_start_y, filter_pane_width, info_subpane_height}
+		ui_state.stats_pane_rect         = Rect{stats_pane_x, pane_start_y, ui_state.width - stats_pane_x, info_subpane_height}
+
+		ui_state.full_flamegraph_rect    = Rect{spall_x_pad, topbars_height, flamegraph_width, flamegraph_height}
+
+		ui_state.inner_flamegraph_rect    = ui_state.full_flamegraph_rect
+		ui_state.inner_flamegraph_rect.y += ui_state.flamegraph_toptext_height
+		ui_state.inner_flamegraph_rect.h -= ui_state.flamegraph_toptext_height
+
+		ui_state.padded_flamegraph_rect    = ui_state.inner_flamegraph_rect
+		ui_state.padded_flamegraph_rect.y += em
+		ui_state.padded_flamegraph_rect.h -= em
+
 		#partial switch ui_state.ui_mode {
-			case .MainMenu: draw_main_menu(&rects, &text_rects, &ui_state, dt, window)
+			case .MainMenu: draw_main_menu(&rects, trace, &ui_state, dt, window)
 			case .TraceView: draw_trace(&rects, &text_rects, trace, &ui_state, &global_pool, dt, window)
+		}
+
+		// reset the cursor if we're not over a selectable thing
+		if !is_hovering {
+			reset_cursor()
 		}
 
 		// Phew... Ok, time to dump to the screen

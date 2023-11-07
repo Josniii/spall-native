@@ -5,12 +5,14 @@ import "core:mem"
 import "core:math/rand"
 import "core:math/linalg/glsl"
 
-bg_color      := BVec4{}
-bg_color2     := BVec4{}
-text_color    := BVec4{}
-text_color2   := BVec4{}
-text_color3   := BVec4{}
-line_color    := BVec4{}
+bg_color        := BVec4{}
+bg_color2       := BVec4{}
+text_color      := BVec4{}
+text_color2     := BVec4{}
+text_color3     := BVec4{}
+subtext_color   := BVec4{}
+hint_text_color := BVec4{}
+line_color      := BVec4{}
 division_color    := BVec4{}
 subdivision_color := BVec4{}
 outline_color := BVec4{}
@@ -53,6 +55,8 @@ default_colors :: proc "contextless" (is_dark: bool) {
 		text_color       = BVec4{255, 255, 255, 255}
 		text_color2      = BVec4{180, 180, 180, 255}
 		text_color3      = BVec4{0,     0,   0, 255}
+		subtext_color    = BVec4{120, 120, 120, 255}
+		hint_text_color  = BVec4{60,   60,  60, 255}
 		line_color       = BVec4{0,     0,   0, 255}
 		outline_color    = BVec4{80,   80,  80, 255}
 
@@ -83,6 +87,8 @@ default_colors :: proc "contextless" (is_dark: bool) {
 		text_color       = BVec4{20,   20,  20, 255}
 		text_color2      = BVec4{80,   80,  80, 255}
 		text_color3      = BVec4{0,     0,   0, 255}
+		subtext_color    = BVec4{40,   40,  40, 255}
+		hint_text_color  = BVec4{60,   60,  60, 255}
 		line_color       = BVec4{200, 200, 200, 255}
 		outline_color    = BVec4{219, 211, 205, 255}
 
