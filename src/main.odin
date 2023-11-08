@@ -281,6 +281,7 @@ main :: proc() {
 	// If the user passed us a trace, save off the filename now
 	if len(os.args) == 2 {
 		start_trace = strings.clone(os.args[1])
+		ui_state.ui_mode = .TraceView
 	}
 
 	thread_count := max(os.processor_core_count() - 1, 1)
