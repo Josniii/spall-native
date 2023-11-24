@@ -33,14 +33,8 @@ Manual_Event_Type :: enum u8 {
 
 Auto_Event_Type :: enum u8 {
 	Invalid    = 0,
-	MicroBegin_1 = 1,
-	MicroBegin_2 = 2,
-	MicroBegin_4 = 3,
-	MicroBegin_8 = 4,
-	MicroEnd_1   = 5,
-	MicroEnd_2   = 6,
-	MicroEnd_4   = 7,
-	MicroEnd_8   = 8,
+    Begin      = 1,
+    End        = 2,
 }
 
 Buffer_Header :: struct #packed {
@@ -49,46 +43,16 @@ Buffer_Header :: struct #packed {
     first_ts: u64,
 }
 
-MicroBegin_Event_1 :: struct #packed {
-	type: u8, 
-    dt: u8,
-	address: u64,
-	caller: u64,
-}
-MicroBegin_Event_2 :: struct #packed {
-	type: u8, 
-    dt: u16,
-	address: u64,
-	caller: u64,
-}
-MicroBegin_Event_4 :: struct #packed {
-	type: u8, 
-    dt: u32,
-	address: u64,
-	caller: u64,
-}
-MicroBegin_Event_8 :: struct #packed {
-	type: u8, 
-    dt: u64,
-	address: u64,
-	caller: u64,
+Auto_Begin_Event :: struct #packed {
+	type:     Auto_Event_Type,
+	time:     u64,
+	name_len: u8,
+	args_len: u8,
 }
 
-MicroEnd_Event_1 :: struct #packed {
-	type: u8,
-    dt: u8,
-}
-MicroEnd_Event_2 :: struct #packed {
-	type: u8,
-    dt: u16,
-}
-MicroEnd_Event_4 :: struct #packed {
-	type: u8,
-    dt: u32,
-}
-MicroEnd_Event_8 :: struct #packed {
-	type: u8,
-    dt: u64,
+Auto_End_Event :: struct #packed {
+	type:     Auto_Event_Type,
+	time:     u64,
 }
 
 Begin_Event_V1 :: struct #packed {

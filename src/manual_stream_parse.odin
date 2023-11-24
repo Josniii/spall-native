@@ -283,7 +283,7 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 		trace.total_min_time = min(trace.total_min_time, ev.timestamp)
 		trace.total_max_time = max(trace.total_max_time, ev.timestamp + ev.duration)
 
-		if int(thread.current_depth) >= len(thread.depths) {
+		if thread.current_depth >= len(thread.depths) {
 			depth := Depth{
 				events = make([dynamic]Event),
 			}

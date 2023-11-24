@@ -61,11 +61,18 @@ void spall_auto_quit(void);
 bool spall_auto_thread_init(uint32_t thread_id, size_t buffer_size);
 void spall_auto_thread_quit(void);
 
+bool spall_auto_buffer_begin(const char *name, signed long name_len, const char *args, signed long args_len);
+bool spall_auto_buffer_end(void);
+
+void spall_auto_set_all_instrumenting(bool on);
+void spall_auto_set_thread_instrumenting(bool on);
+
 #if SPALL_IS_GCC && SPALL_IS_CPP
     #define _Thread_local thread_local
 #endif
 
 #define SPALL_DEFAULT_BUFFER_SIZE (128 * 1024 * 1024)
+#define SPALL_MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 #ifdef __cplusplus
 }
@@ -130,19 +137,19 @@ extern "C" {
 
 #if SPALL_IS_X64
 #include <x86intrin.h>
-SPALL_FN SPALL_NOINSTRUMENT uint64_t spall_get_clock(void) {
+SPALL_FN uint64_t spall_get_clock(void) {
     return __rdtsc();
 }
-SPALL_FN SPALL_NOINSTRUMENT void spall_pause(void) {
+SPALL_FN void spall_pause(void) {
     _mm_pause();
 }
 #elif SPALL_IS_ARM64
-SPALL_FN SPALL_NOINSTRUMENT uint64_t spall_get_clock(void) {
+SPALL_FN uint64_t spall_get_clock(void) {
     int64_t timer_val;
     asm volatile("mrs %0, cntvct_el0" : "=r"(timer_val));
     return (uint64_t)timer_val;
 }
-SPALL_FN SPALL_NOINSTRUMENT void spall_pause(void) {
+SPALL_FN void spall_pause(void) {
     asm volatile("yield");
 }
 #endif
@@ -151,27 +158,46 @@ SPALL_FN SPALL_NOINSTRUMENT void spall_pause(void) {
 
 typedef struct SpallHeader {
     uint64_t magic_header; // = 0xABADF00D
-    uint64_t version; // = 1
+    uint64_t version; // = 2
     double   timestamp_unit;
     uint64_t known_address; // Address for spall_auto_init, for skew-correction
     uint16_t program_path_len;
 } SpallHeader;
 
 enum {
-    SpallEventType_Invalid    = 0,
+    SpallAutoEventType_Invalid = 0,
+    SpallAutoEventType_Begin   = 1,
+    SpallAutoEventType_End     = 2,
 };
 
-typedef struct SpallMicroBeginEvent_8 {
+typedef struct SpallMicroBeginEventMax {
     uint8_t type;
     uint64_t ts;
-    uint64_t addr;
     uint64_t caller;
-} SpallMicroBeginEvent_8;
+} SpallMicroBeginEventMax;
 
-typedef struct SpallMicroEndEvent_8 {
+typedef struct SpallMicroEndEventMax {
     uint8_t type;
     uint64_t ts;
-} SpallMicroEndEvent_8;
+} SpallMicroEndEventMax;
+
+typedef struct SpallAutoBeginEvent {
+    uint8_t type;
+    uint64_t when;
+    uint8_t name_length;
+    uint8_t args_length;
+} SpallAutoBeginEvent;
+
+typedef struct SpallAutoBeginEventMax {
+    SpallAutoBeginEvent event;
+    char name_bytes[255];
+    char args_bytes[255];
+} SpallAutoBeginEventMax;
+
+typedef struct SpallAutoEndEvent {
+    uint8_t type;
+    uint64_t when;
+} SpallAutoEndEvent;
 
 typedef struct SpallBufferHeader {
     uint32_t size;
@@ -198,6 +224,16 @@ SPALL_FN SPALL_FORCEINLINE uint64_t spall_delta_to_size(uint64_t dt) {
 
 SPALL_FN SPALL_FORCEINLINE uint64_t spall_delta_min_size(uint64_t dt) {
     return spall_delta_to_size(spall_branchless_abs(dt) << 1);
+}
+
+SPALL_FN int spall_write_val(uint8_t *buf, uint64_t val, uint64_t size) {
+    switch (size) {
+    case 1: *(uint8_t  *)buf = (uint8_t)val;
+    case 2: *(uint16_t *)buf = (uint16_t)val;
+    case 4: *(uint32_t *)buf = (uint32_t)val;
+    case 8: *(uint64_t *)buf = (uint64_t)val;
+    }
+    return size;
 }
 
 typedef struct SpallProfile {
@@ -477,7 +513,15 @@ SPALL_FN SPALL_FORCEINLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
 // Auto-tracing impl
 static SpallProfile spall_ctx;
 static _Thread_local SpallBuffer *spall_buffer = NULL;
+static Spall_Atomic(bool) spall_instruments_running = false;
 static _Thread_local bool spall_thread_running = false;
+
+SPALL_NOINSTRUMENT void spall_auto_set_thread_instrumenting(bool on) {
+    spall_thread_running = on;
+}
+SPALL_NOINSTRUMENT void spall_auto_set_all_instrumenting(bool on) {
+    atomic_store(&spall_instruments_running, on);
+}
 
 #if SPALL_IS_WINDOWS
 SPALL_FN void spall_writer(void *arg) {
@@ -505,7 +549,7 @@ SPALL_FN void *spall_writer(void *arg) {
 
 SPALL_FN SPALL_FORCEINLINE bool spall__file_write(void *p, size_t n) {
     spall_buffer->writer.size = n;
-    spall_buffer->writer.ptr = (uint64_t)p;
+    atomic_store(&spall_buffer->writer.ptr, (uint64_t)p);
     spall_signal(&spall_buffer->writer.ptr);
 
     while (spall_buffer->writer.ptr != 0) { spall_pause(); }
@@ -542,7 +586,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_flush(void) {
 }
 
 SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t caller) {
-    size_t ev_size = sizeof(SpallMicroBeginEvent_8);
+    size_t ev_size = sizeof(SpallMicroBeginEventMax);
     if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
         if (!spall_buffer_flush()) {
             return false;
@@ -550,32 +594,30 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t
     }
 
     size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
+    uint8_t *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
+
     uint64_t now = spall_get_clock();
     if (spall_buffer->first_ts == 0) {
         spall_buffer->first_ts = now;
         spall_buffer->previous_ts = now;
     }
 
-    uint8_t *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
-
-    uint64_t dt = now - spall_buffer->previous_ts;
-
-    uint64_t d_addr   = addr - spall_buffer->previous_addr;
+    uint64_t dt       = now    - spall_buffer->previous_ts;
+    uint64_t d_addr   = addr   - spall_buffer->previous_addr;
     uint64_t d_caller = caller - spall_buffer->previous_caller;
 
     uint64_t dt_size     = spall_delta_to_size(dt);
     uint64_t addr_size   = spall_delta_min_size(d_addr);
     uint64_t caller_size = spall_delta_min_size(d_caller);
-    //printf("%d | addr: %llx, delta: %lld, size: %lld\n", spall_buffer->thread_id, addr, d_addr, addr_size);
 
     // [begin event tag | size of ts | size of addr | size of caller]
-    uint8_t type_byte = (1 << 6) | (spall_squash_2[dt_size] << 4) | (spall_squash_2[addr_size] << 2) | spall_squash_2[caller_size];
+    uint8_t type_byte = (0 << 6) | (spall_squash_2[dt_size] << 4) | (spall_squash_2[addr_size] << 2) | spall_squash_2[caller_size];
 
     int i = 0;
     *(ev_buffer + i) = type_byte; i += 1;
-    memcpy(ev_buffer + i, &dt, dt_size);           i += dt_size;
-    memcpy(ev_buffer + i, &d_addr, addr_size);     i += addr_size;
-    memcpy(ev_buffer + i, &d_caller, caller_size); i += caller_size;
+    i += spall_write_val(ev_buffer + i, dt,       dt_size);
+    i += spall_write_val(ev_buffer + i, d_addr,   addr_size);
+    i += spall_write_val(ev_buffer + i, d_caller, caller_size);
 
     spall_buffer->previous_ts = now;
     spall_buffer->previous_addr = addr;
@@ -588,7 +630,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t
 SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
     uint64_t now = spall_get_clock();
 
-    size_t ev_size = sizeof(SpallMicroEndEvent_8);
+    size_t ev_size = sizeof(SpallMicroEndEventMax);
     if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
         if (!spall_buffer_flush()) {
             return false;
@@ -606,17 +648,63 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
     uint64_t dt_size = spall_delta_to_size(dt);
 
     // [end event tag | size of ts]
-    uint8_t type_byte = (2 << 6) | (spall_squash_2[dt_size] << 4);
+    uint8_t type_byte = (1 << 6) | (spall_squash_2[dt_size] << 4);
 
     int i = 0;
     *(ev_buffer + i) = type_byte; i += 1;
-    memcpy(ev_buffer + i, &dt, dt_size); i += dt_size;
+    i += spall_write_val(ev_buffer + i, dt, dt_size);
 
     spall_buffer->previous_ts = now;
     spall_buffer->head += i;
     return true;
 }
 
+SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_begin(const char *name, signed long name_len, const char *args, signed long args_len) {
+    if ((spall_buffer->head + sizeof(SpallAutoBeginEventMax)) > spall_buffer->sub_length) {
+        if (!spall_buffer_flush()) {
+            return false;
+        }
+    }
+    uint8_t trunc_name_len = (uint8_t)SPALL_MIN(name_len, 255);
+    uint8_t trunc_args_len = (uint8_t)SPALL_MIN(args_len, 255);
+    size_t ev_size = sizeof(SpallAutoBeginEvent) + trunc_name_len + trunc_args_len;
+
+    size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
+    uint8_t *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
+    SpallAutoBeginEventMax *ev = (SpallAutoBeginEventMax *)ev_buffer;
+
+    ev->event.type = (2 << 6) | SpallAutoEventType_Begin;
+    ev->event.name_length = trunc_name_len;
+    ev->event.args_length = trunc_args_len;
+    memcpy(ev->name_bytes                 , name, trunc_name_len);
+    memcpy(ev->name_bytes + trunc_name_len, args, trunc_args_len);
+    spall_buffer->head += ev_size;
+
+    // defer timestamp as late as possible on begin
+    ev->event.when = spall_get_clock();
+    return true;
+}
+
+SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_end(void) {
+    // defer timestamp as early as possible on end
+    uint64_t now = spall_get_clock();
+
+    size_t ev_size = sizeof(SpallAutoEndEvent);
+    if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
+        if (!spall_buffer_flush()) {
+            return false;
+        }
+    }
+
+    size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
+    uint8_t *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
+    SpallAutoEndEvent *ev = (SpallAutoEndEvent *)ev_buffer;
+
+    ev->type = (2 << 6) | SpallAutoEventType_End;
+    ev->when = now;
+    spall_buffer->head += ev_size;
+    return true;
+}
 
 SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool (spall_auto_thread_init)(uint32_t thread_id, size_t buffer_size) {
     if (buffer_size < 512) { return false; }
@@ -686,7 +774,7 @@ bool spall_auto_init(char *filename) {
     spall_ctx.stamp_scale = spall_get_clock_multiplier();
     SpallHeader header = {0};
     header.magic_header = 0xABADF00D;
-    header.version = 1;
+    header.version = 2;
     header.timestamp_unit = spall_ctx.stamp_scale;
     header.known_address = (uint64_t)spall_canonical_addr((void *)spall_auto_init);
 
@@ -706,13 +794,17 @@ bool spall_auto_init(char *filename) {
 
     free(full_header);
 
+    atomic_store(&spall_instruments_running, true);
     return true;
 }
 
-void spall_auto_quit(void) { }
+void spall_auto_quit(void) {
+    atomic_store(&spall_instruments_running, false);
+}
 
 SPALL_NOINSTRUMENT void __cyg_profile_func_enter(void *fn, void *caller) {
-    if (!spall_thread_running) {
+    bool instruments_running = atomic_load(&spall_instruments_running);
+    if (!spall_thread_running || !instruments_running) {
         return;
     }
     fn = spall_canonical_addr(fn);
@@ -723,7 +815,8 @@ SPALL_NOINSTRUMENT void __cyg_profile_func_enter(void *fn, void *caller) {
 }
 
 SPALL_NOINSTRUMENT void __cyg_profile_func_exit(void *fn, void *caller) {
-    if (!spall_thread_running) {
+    bool instruments_running = atomic_load(&spall_instruments_running);
+    if (!spall_thread_running || !instruments_running) {
         return;
     }
 
