@@ -216,6 +216,7 @@ threaded_config_load :: proc(pool: ^Pool, data: rawptr) {
 	load_file(trace, filename)
 	duration := time.tick_since(start_time)
 	fmt.printf("runtime: %f ms, got %s events\n", time.duration_milliseconds(duration), tens_fmt(u64(trace.event_count)))
+	fmt.printf("trace length: %s\n", time_fmt(disp_time(trace, f64(trace.total_max_time - trace.total_min_time))))
 
 	ui_state.loading_config = false
 	ui_state.post_loading = true
