@@ -1482,21 +1482,58 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		thread := trace.processes[p_idx].threads[t_idx]
 		ev := thread.depths[d_idx].events[e_idx]
 		name := ev_name(trace, &ev)
-		draw_text(rects, name, Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 
+		edge_pad      := 1 * em
+		button_height := 1 * em
+		button_width  := 1 * em
+
+		LineVal :: struct {
+			y: f64,
+			str: string,
+		}
+
+		text_x := stats_pane_x + button_width + edge_pad
+		text_val := LineVal{y, name}
+		draw_text(rects, name, Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+
+		args_val := LineVal{-1, ""}
 		if ev.args > 0 {
 			args_str := in_getstr(&trace.string_block, ev.args)
-			draw_text(rects, fmt.tprintf(" user data: %s", args_str), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+			args_val = LineVal{y, args_str}
+			draw_text(rects, fmt.tprintf(" user data: %s", args_str), Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 		}
+
+		loc_val := LineVal{-1, ""}
 		if ev.has_addr {
 			file, line, ok := get_line_info(trace, ev.id)
 			if ok {
-				draw_text(rects, fmt.tprintf(" location: %s:%d", file, line), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+				loc_str := fmt.tprintf("%s:%d", file, line)
+				line_str := fmt.tprintf("  location: %s", loc_str)
+				loc_val = LineVal{y, loc_str}
+				draw_text(rects, line_str, Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 			}
 		}
-		draw_text(rects, fmt.tprintf("start time: %s", time_fmt(disp_time(trace, f64(ev.timestamp - trace.total_min_time)))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
-		draw_text(rects, fmt.tprintf("  duration: %s", time_fmt(disp_time(trace, f64(bound_duration(&ev, thread.max_time))))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
-		draw_text(rects, fmt.tprintf(" self time: %s", time_fmt(disp_time(trace, f64(ev.self_time)))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+
+		draw_text(rects, fmt.tprintf("start time: %s", time_fmt(disp_time(trace, f64(ev.timestamp - trace.total_min_time)))), Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+		draw_text(rects, fmt.tprintf("  duration: %s", time_fmt(disp_time(trace, f64(bound_duration(&ev, thread.max_time))))), Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+		draw_text(rects, fmt.tprintf(" self time: %s", time_fmt(disp_time(trace, f64(ev.self_time)))), Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+
+		if loc_val.y != -1 {
+			if button(rects, Rect{stats_pane_x, loc_val.y, button_height, button_width}, 
+					  "\uf0ea", "Copy Location", .IconFont, 0, ui_state.width) {
+				set_clipboard(loc_val.str)
+			}
+		}
+		if args_val.y != -1 {
+			if button(rects, Rect{stats_pane_x, args_val.y, button_height, button_width}, 
+					  "\uf0ea", "Copy Function Extra Data", .IconFont, 0, ui_state.width) {
+				set_clipboard(args_val.str)
+			}
+		}
+		if button(rects, Rect{stats_pane_x, text_val.y, button_height, button_width}, 
+				  "\uf0ea", "Copy Function Name", .IconFont, 0, ui_state.width) {
+			set_clipboard(text_val.str)
+		}
 
 		// If we've got stats cooking already
 	} else if trace.stats.state == .Pass1 || trace.stats.state == .Pass2 {

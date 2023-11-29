@@ -11,7 +11,7 @@
 #include "../../spall_native_auto.h"
 
 static void bar(void) {
-    spall_auto_buffer_begin("jam", 3, "", 0);
+    spall_auto_buffer_begin("jam", 3, "my args", 7);
     spall_auto_buffer_end();
 }
 static void woz(void) {}
