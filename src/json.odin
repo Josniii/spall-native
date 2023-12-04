@@ -584,7 +584,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 							}
 						}
 
-						append(&nodes_to_begin, cur_node_id)
+						non_zero_append(&nodes_to_begin, cur_node_id)
 						cur_node_id = profile.nodes[cur_node_id].parent
 
 						if cycle_count > 1000 {
@@ -946,7 +946,7 @@ json_push_instant :: proc(trace: ^Trace, event: ^TempEvent) {
 	trace.instant_count += 1
 
 	if event.scope == .Global {
-		append(&trace.global_instants, instant)
+		non_zero_append(&trace.global_instants, instant)
 		return
 	}
 
@@ -954,7 +954,7 @@ json_push_instant :: proc(trace: ^Trace, event: ^TempEvent) {
 	p := &trace.processes[p_idx]
 
 	if event.scope == .Process {
-		append(&p.instants, instant)
+		non_zero_append(&p.instants, instant)
 		return
 	}
 
@@ -962,7 +962,7 @@ json_push_instant :: proc(trace: ^Trace, event: ^TempEvent) {
 
 	t := &p.threads[t_idx]
 	if event.scope == .Thread {
-		append(&t.instants, instant)
+		non_zero_append(&t.instants, instant)
 		return
 	}
 }
@@ -1074,17 +1074,17 @@ json_process_events :: proc(trace: ^Trace) {
 
 				cur_depth := ev_stack.len - 1
 				if cur_depth >= len(tm.depths) {
-					append(&tm.depths, Depth{
+					non_zero_append(&tm.depths, Depth{
 						events = make([dynamic]Event),
 					})
 				}
-				append(&depth_arr, cur_depth)
+				non_zero_append(&depth_arr, cur_depth)
 			}
 
 			for event, idx in tm.events {
 				depth := depth_arr[idx]
 
-				append(&tm.depths[depth].events, Event{
+				non_zero_append(&tm.depths[depth].events, Event{
 					id = event.id,
 					args = event.args,
 					timestamp = event.timestamp,

@@ -207,7 +207,7 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 								panic("Out of Memory!\n")
 							}
 
-							append(&trace.line_info, Line_Info{line_addr + u64(line.offset) + skew_size, u64(line_num), interned_name})
+							non_zero_append(&trace.line_info, Line_Info{line_addr + u64(line.offset) + skew_size, u64(line_num), interned_name})
 							cur_offset += size_of(PDB_Line)
 						}
 

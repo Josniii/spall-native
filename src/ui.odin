@@ -2144,7 +2144,7 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 				}
 
 				if real_start != -1 && real_end != -1 {
-					append(&trace.stats.selected_ranges, Range{p_idx, t_idx, d_idx, real_start, real_end})
+					non_zero_append(&trace.stats.selected_ranges, Range{p_idx, t_idx, d_idx, real_start, real_end})
 				}
 			}
 		}

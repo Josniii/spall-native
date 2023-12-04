@@ -98,7 +98,7 @@ ms_v1_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Even
 		depth := Depth{
 			events = make([dynamic]Event),
 		}
-		append(&t.depths, depth)
+		non_zero_append(&t.depths, depth)
 	}
 
 	depth := &t.depths[t.current_depth]
@@ -287,7 +287,7 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 			depth := Depth{
 				events = make([dynamic]Event),
 			}
-			append(&thread.depths, depth)
+			non_zero_append(&thread.depths, depth)
 		}
 
 		depth := &thread.depths[thread.current_depth]

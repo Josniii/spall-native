@@ -85,7 +85,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 depth := Depth{
                     events = make([dynamic]Event),
                 }
-                append(&thread.depths, depth)
+                non_zero_append(&thread.depths, depth)
             }
 
             depth := &thread.depths[thread.current_depth]
@@ -187,7 +187,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                     depth := Depth{
                         events = make([dynamic]Event),
                     }
-                    append(&thread.depths, depth)
+                    non_zero_append(&thread.depths, depth)
                 }
 
                 depth := &thread.depths[thread.current_depth]
