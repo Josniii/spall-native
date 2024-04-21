@@ -66,5 +66,69 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v1
         with:
-          name: osx_artifacts
+          name: osx_x86_artifacts
+          path: bin
+
+  build_mac_arm:
+    name: OSX ARM Build and Test
+    runs-on: macos-14
+    steps:
+      - name: Grab Spall Dependencies
+        run: |
+          brew install sdl2 sdl2_ttf llvm@17
+          echo "/opt/homebrew/opt/llvm@17/bin" >> $GITHUB_PATH
+    
+      - name: Checkout Spall
+        uses: actions/checkout@v4
+    
+      - name: Checkout Odin
+        uses: actions/checkout@v4
+        with:
+          repository: Odin-lang/odin
+          path: odin
+
+      - name: Build Odin
+        run: |
+          cd odin
+          ./build_odin.sh
+          echo $PWD >> $GITHUB_PATH
+        
+      - name: Build Spall
+        run: |
+          ./build.sh release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v1
+        with:
+          name: osx_arm_artifacts
+          path: bin
+
+  build_windows:
+    name: Windows Build and Test
+    runs-on: windows-2022
+    steps:
+      - name: Checkout Spall
+        uses: actions/checkout@v4
+    
+      - name: Checkout Odin
+        uses: actions/checkout@v4
+        with:
+          repository: Odin-lang/odin
+          path: odin
+
+      - name: Build Odin
+        run: |
+          cd odin
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+          ./build.bat
+          Add-Content $env:GITHUB_PATH (Get-Item .).FullName
+        
+      - name: Build Spall
+        run: |
+          ./build.bat release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v1
+        with:
+          name: windows_artifacts
           path: bin
