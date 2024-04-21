@@ -42,7 +42,7 @@ jobs:
       - name: Grab Spall Dependencies
         run: |
           brew install sdl2 sdl2_ttf llvm@17
-          echo "/opt/homebrew/opt/llvm@17/bin" >> $GITHUB_PATH
+          echo "/usr/local/opt/llvm@17/bin" >> $GITHUB_PATH
     
       - name: Checkout Spall
         uses: actions/checkout@v4
