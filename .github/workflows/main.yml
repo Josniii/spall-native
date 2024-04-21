@@ -6,6 +6,10 @@ jobs:
     name: Ubuntu Build and Test
     runs-on: ubuntu-latest
     steps:
+      - name: Grab Spall Dependencies
+        run: |
+          sudo apt install libsdl2-dev libsdl2_ttf-dev
+    
       - name: Checkout Spall
         uses: actions/checkout@v4
     
@@ -23,5 +27,4 @@ jobs:
         
       - name: Build Spall
         run: |
-          echo $GITHUB_PATH
           ./build.sh release
