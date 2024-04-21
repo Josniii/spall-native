@@ -23,4 +23,5 @@ jobs:
         
       - name: Build Spall
         run: |
+          echo $GITHUB_PATH
           ./build.sh release
