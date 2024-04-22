@@ -146,7 +146,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: colrdavidson/spall-web
-          path: spall-web
+          path: spall_web
       
       - name: Grab Windows artifacts
         uses: actions/download-artifact@v4
@@ -178,7 +178,7 @@ jobs:
           cp resources/SDL2_ttf.dll         spall_pkg/.
           cp resources/demo_trace.json      spall_pkg/.
           cp spall_native_auto.h            spall_pkg/.
-          cp spall-web/spall.h              spall_pkg/.
+          cp spall_web/spall.h              spall_pkg/.
           mkdir spall_pkg/examples
           cp -r spall_web/examples/*        spall_pkg/examples/.
           cp -r examples/*                  spall_pkg/examples/.
