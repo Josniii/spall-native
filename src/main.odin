@@ -602,7 +602,7 @@ main :: proc() {
 				case .R:
 					if trace.file_name != "" && !capture_text && ctrl_down && !ui_state.loading_config {
 						fmt.printf("attempting to load %s\n", trace.file_name)
-						start_trace = trace.file_name
+						start_trace = strings.clone(trace.file_name)
 						// NOTE(will) maybe necessary?
 						ui_state.ui_mode = .TraceView
 					}
