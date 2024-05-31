@@ -21,6 +21,7 @@ import SDL "vendor:sdl2"
 import gl "vendor:OpenGL"
 
 import SDL_TTF "vendor:sdl2/ttf"
+import stbtt "vendor:stb/truetype"
 
 // input state
 is_mouse_down  := false
@@ -416,6 +417,14 @@ main :: proc() {
 	fonts := [][]u8{ sans_font, mono_font, icon_font }
 	sizes := []f64{ p_height * dpr, h1_height * dpr, h2_height * dpr }
 	all_fonts = grab_static_fonts(fonts, sizes)
+
+	stbtt.InitFont(&font_map[FontType.DefaultFont], raw_data(sans_font), 0)
+	stbtt.InitFont(&font_map[FontType.MonoFont], raw_data(mono_font), 0)
+	stbtt.InitFont(&font_map[FontType.IconFont], raw_data(icon_font), 0)
+
+	font_size[FontSize.PSize] = cast(f32)sizes[0]
+	font_size[FontSize.H1Size] = cast(f32)sizes[1]
+	font_size[FontSize.H2Size] = cast(f32)sizes[2]
 
 	rect_program, rect_prog_ok := gl.load_shaders_source(rect_vert_src, rect_frag_src)
 	if !rect_prog_ok {

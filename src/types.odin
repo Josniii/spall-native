@@ -12,6 +12,13 @@ FVec3 :: [3]f32
 FVec4 :: [4]f32
 BVec4 :: [4]u8
 
+IRect :: struct {//[4]i32
+	x: i32,
+	y: i32,
+	w: i32,
+	h: i32,
+}
+
 Rect :: struct {
 	x: f64,
 	y: f64,
@@ -115,6 +122,7 @@ FontSize :: enum u8 {
 	H2Size,
 	LastSize,
 }
+
 FontType :: enum u8 {
 	DefaultFont = 0,
 	MonoFont,

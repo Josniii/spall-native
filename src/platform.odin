@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:math"
 import "core:container/lru"
 import "core:time"
+import "core:unicode/utf8"
 
 import SDL "vendor:sdl2"
 import SDL_TTF "vendor:sdl2/ttf"
@@ -140,21 +141,104 @@ rm_text_cache :: proc(key: LRU_Key, value: LRU_Text, udata: rawptr) {
 cache_hits_this_frame := 0
 cache_misses_this_frame := 0
 
+
+import stbtt "vendor:stb/truetype"
+font_map: [FontType.LastFont]stbtt.fontinfo
+font_temp : [256*256]u8
+font_size : [FontSize.LastSize]f32
+
+alpha_blit :: proc(dst, src:IRect, srcStride:i32, output:[]u8, input:[]u8)
+{
+	for i :i32= 0; i < src.h; i += 1 {
+		for j :i32= 0; j < src.w; j += 1 {
+			output[(i+dst.y) * dst.w + (j+dst.x)] += input[(i+src.y) * srcStride + (j+src.x)]
+		}
+	}
+}
+
 get_text_cache :: proc(str: string, scale: FontSize, font_type: FontType) -> LRU_Text {
 	text_blob, ok := lru.get(&lru_text_cache, LRU_Key{ scale, font_type, str })
 	if !ok {
 		font := get_font(scale, font_type)
 
 		long_str := strings.clone(str)
-		potato := strings.clone_to_cstring(long_str, context.temp_allocator)
-		surface := SDL_TTF.RenderUTF8_Blended(font, potato, SDL.Color{255, 255, 255, 255})
-		width := surface.w
-		height := surface.h
+		//potato := strings.clone_to_cstring(long_str, context.temp_allocator)
+		//surface := SDL_TTF.RenderUTF8_Blended(font, potato, SDL.Color{255, 255, 255, 255})
 
-		pixels := make([]u8, width * height * 4)
-		SDL.ConvertPixels(width, height, surface.format.format, surface.pixels, surface.pitch,
-						  surface.format.format, raw_data(pixels), width * 4)
-		SDL.FreeSurface(surface)
+
+		width :i32= 0
+		height :i32= 0
+		pen := FVec2 {0, 0}
+		pixel_height := font_size[scale] 
+		fontinfo := &font_map[font_type]
+
+		sf := stbtt.ScaleForPixelHeight(fontinfo, pixel_height)
+
+		// loop 1: determine size of text to be drawn
+		for ch in str {
+			adv, lsb : i32
+			stbtt.GetCodepointHMetrics(fontinfo, ch, &adv, &lsb)
+			width += adv
+		}
+		width = cast(i32)(cast(f32)width * sf)
+		width += 2
+
+		ascent, descent, lineGap : i32
+		stbtt.GetFontVMetrics(fontinfo, &ascent, &descent, &lineGap)
+		height += cast(i32)(cast(f32)(ascent - descent) * sf + 2)
+
+		baseline := cast(i32)(cast(f32)ascent * sf) + 1
+
+		output := make([]u8, width * height)
+
+
+
+		runes := utf8.string_to_runes(str)
+
+
+		for ch, i in runes {
+			adv, lsb : i32
+			stbtt.GetCodepointHMetrics(fontinfo, ch, &adv, &lsb)
+
+			ix0, iy0, ix1, iy1 : i32
+			stbtt.GetCodepointBitmapBox(fontinfo, ch, sf, sf, &ix0, &iy0, &ix1, &iy1)
+			x0, y0, x1, y1:i32
+			stbtt.GetCodepointBox(fontinfo, ch, &x0, &y0, &x1, &y1)
+
+			stbtt.MakeCodepointBitmap(fontinfo, raw_data(font_temp[:]), ix1 - ix0, iy1 - iy0, 256, sf, sf, ch)
+
+		//fmt.print("%v %v %v\n", ix0, lsb, ix0 - lsb)
+			src := IRect { 0, 0, ix1 - ix0, iy1 - iy0 }
+			dst := IRect { cast(i32) (pen.x + cast(f32)(lsb-ix0) * sf) , baseline + iy0, width, height }
+
+			alpha_blit(dst, src, 256, output, font_temp[:])
+
+			if i < len(runes)-1 {
+				pen.x += sf * cast(f32)stbtt.GetCodepointKernAdvance(fontinfo, ch, runes[i+1])
+			}
+
+			pen.x += cast(f32)adv * sf
+			// ignore kerning for now
+
+		}
+
+		//width := surface.w
+		//height := surface.h
+
+		//pixels := make([]u8, width * height * 4)
+		//SDL.ConvertPixels(width, height, surface.format.format, surface.pixels, surface.pitch,
+		//				  surface.format.format, raw_data(pixels), width * 4)
+
+		//SDL.FreeSurface(surface)
+
+
+
+		output32 := make([]u32, width * height)
+		for i := 0; i < len(output); i += 1 {
+			o := cast(u32)output[i]
+			output32[i] = o << 24 | o << 8 | o << 16 | o
+		}
+
 
 		handle : u32 = 0
 		gl.GenTextures(1, &handle)
@@ -164,8 +248,10 @@ get_text_cache :: proc(str: string, scale: FontSize, font_type: FontType) -> LRU
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(pixels))
-		delete(pixels)
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(output32))
+		delete(output)
+		delete(output32)
+		//delete(pixels)
 
 		text_blob = LRU_Text{ handle, width, height }
 		lru.set(&lru_text_cache, LRU_Key{ scale, font_type, long_str }, text_blob)
