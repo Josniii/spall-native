@@ -475,12 +475,11 @@ parse_dropped_files_list :: proc(data: cstring) -> string {
 }
 
 get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
-	if xlib.Pending(gfx.x_display) == 0 {
+	if xlib.Pending(gfx.x_display) == 0 && !wait {
 		return PlatformEvent{type = .None}
 	}
 
 	event: xlib.XEvent
-
 	xlib.NextEvent(gfx.x_display, &event)
 	#partial switch event.type {
 		case .ClientMessage: {

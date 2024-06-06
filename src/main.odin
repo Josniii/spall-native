@@ -18,7 +18,6 @@ import "core:prof/spall"
 import glm "core:math/linalg/glsl"
 
 import gl "vendor:OpenGL"
-
 import stbtt "vendor:stb/truetype"
 
 // input state
