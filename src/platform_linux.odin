@@ -492,6 +492,7 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 					}
 				}
 				case gfx.dnd_enter: {
+					// New drag-and-drop event just entered the window
 					src_win := xlib.Window(event.xclient.data.l[0])
 					is_list := 0 != (event.xclient.data.l[1] & 0b1)
 					version := event.xclient.data.l[1] >> 24
@@ -586,13 +587,14 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 				case .Button1: type = .Left
 				case .Button2: type = .Middle
 				case .Button3: type = .Right
-				case:
+				case: {
 					switch int(event.xbutton.button) {
 						case 4: return PlatformEvent{type = .Scroll, x =  0, y =  1}
 						case 5: return PlatformEvent{type = .Scroll, x =  0, y = -1}
 						case 6: return PlatformEvent{type = .Scroll, x =  1, y =  0}
 						case 7: return PlatformEvent{type = .Scroll, x = -1, y =  0}
 					}
+				}
 			}
 			return PlatformEvent{type = .MouseDown, mouse = type, x = f64(event.xbutton.x), y = f64(event.xbutton.y)}
 		}
