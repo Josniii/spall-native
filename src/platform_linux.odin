@@ -111,7 +111,7 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	return string(ret_str), true
 }
 
-normalize_key :: proc(v: xlib.KeySym) -> KeyType {
+_normalize_key :: proc(v: xlib.KeySym) -> KeyType {
 	#partial switch v {
 		case .XK_a: return .A
 		case .XK_b: return .B
@@ -433,7 +433,7 @@ _resolve_key :: proc(x_display: ^xlib.Display, keycode: u8) -> KeyType {
 	dummy: i32
 	keysyms := xlib.GetKeyboardMapping(x_display, u8(keycode), 1, &dummy)
 	sym := slice.from_ptr(keysyms, 1)[0]
-	key := normalize_key(sym)
+	key := _normalize_key(sym)
 	xlib.Free(keysyms)
 	return key
 }
@@ -463,7 +463,7 @@ _x11_get_window_property :: proc(gfx: ^GFX_Context, window: xlib.Window, propert
 	return item_count
 }
 
-parse_dropped_files_list :: proc(data: cstring) -> string {
+_parse_dropped_files_list :: proc(data: cstring) -> string {
 	file_list := strings.clone_from_cstring(data)
 	files_iter := file_list
 	path: string
@@ -571,7 +571,7 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 				data: rawptr
 				result := _x11_get_window_property(gfx, event.xselection.requestor, event.xselection.property, event.xselection.target, &data)
 
-				path := parse_dropped_files_list(cstring(data))
+				path := _parse_dropped_files_list(cstring(data))
 
 				// Confirm Successful Transfer from Drop
 				reply := xlib.XEvent{}
@@ -633,7 +633,9 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 					}
 				}
 			}
-			return PlatformEvent{type = .MouseDown, mouse = type, x = f64(event.xbutton.x), y = f64(event.xbutton.y)}
+			x := f64(event.xbutton.x) / dpr
+			y := f64(event.xbutton.y) / dpr
+			return PlatformEvent{type = .MouseDown, mouse = type, x = x, y = y}
 		}
 		case .ButtonRelease: {
 			type := MouseButtonType.None
@@ -642,10 +644,14 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 				case .Button2: type = .Middle
 				case .Button3: type = .Right
 			}
-			return PlatformEvent{type = .MouseUp, mouse = type, x = f64(event.xbutton.x), y = f64(event.xbutton.y)}
+			x := f64(event.xbutton.x) / dpr
+			y := f64(event.xbutton.y) / dpr
+			return PlatformEvent{type = .MouseUp, mouse = type, x = x, y = y}
 		}
 		case .MotionNotify: {
-			return PlatformEvent{type = .MouseMoved, x = f64(event.xmotion.x), y = f64(event.xmotion.y)}
+			x := f64(event.xmotion.x) / dpr
+			y := f64(event.xmotion.y) / dpr
+			return PlatformEvent{type = .MouseMoved, x = x, y = y}
 		}
 		case .KeyPress: {
 			key := _resolve_key(gfx.x_display, u8(event.xkey.keycode))
@@ -656,7 +662,9 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 			return PlatformEvent{type = .KeyUp, key = key}
 		}
 		case .ConfigureNotify: {
-			return PlatformEvent{type = .Resize, w = f64(event.xconfigure.width), h = f64(event.xconfigure.height)}
+			w := f64(event.xconfigure.width)
+			h := f64(event.xconfigure.height)
+			return PlatformEvent{type = .Resize, w = w, h = h}
 		}
 	}
 	return PlatformEvent{type = .More}
@@ -666,7 +674,7 @@ swap_buffers :: proc(gfx: ^GFX_Context) {
 	egl.SwapBuffers(gfx.egl_display, gfx.surface)
 }
 
-x11_send_event :: proc(gfx: ^GFX_Context, type: xlib.Atom, a, b, c, d, e: int) {
+_x11_send_event :: proc(gfx: ^GFX_Context, type: xlib.Atom, a, b, c, d, e: int) {
 	event := xlib.XEvent{}
 	event.type = .ClientMessage
 	event.xclient.window = gfx.window
@@ -683,9 +691,9 @@ x11_send_event :: proc(gfx: ^GFX_Context, type: xlib.Atom, a, b, c, d, e: int) {
 
 set_fullscreen :: proc(gfx: ^GFX_Context, fullscreen: bool) -> (int, int) {
 	if fullscreen {
-		x11_send_event(gfx, gfx.net_wm_state, 1, int(gfx.net_wm_state_fullscreen), 0, 1, 0)
+		_x11_send_event(gfx, gfx.net_wm_state, 1, int(gfx.net_wm_state_fullscreen), 0, 1, 0)
 	} else {
-		x11_send_event(gfx, gfx.net_wm_state, 0, int(gfx.net_wm_state_fullscreen), 0, 1, 0)
+		_x11_send_event(gfx, gfx.net_wm_state, 0, int(gfx.net_wm_state_fullscreen), 0, 1, 0)
 	}
 
 	xlib.Flush(gfx.x_display)
