@@ -225,6 +225,9 @@ _get_dpi :: proc(x_display: ^xlib.Display) -> f32 {
 
 	dpi_str := string(cstring(value.addr))
 	dpi := f32(strconv.atof(dpi_str))
+	if dpi == 0 {
+		return 96
+	}
 
 	return dpi
 }
