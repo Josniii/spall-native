@@ -216,15 +216,25 @@ _normalize_key :: proc(v: xlib.KeySym) -> KeyType {
 }
 
 _get_dpi :: proc(x_display: ^xlib.Display) -> f32 {
+	dpi : f32 = 96
 	rms := xlib.ResourceManagerString(x_display)
+	if rms == nil {
+		return dpi
+	}
+
 	db := xlib.XrmGetStringDatabase(rms)
+	if db == nil {
+		return dpi
+	}
 
 	type : cstring
 	value := xlib.XrmValue{}
-	xlib.XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &value)
+	if !xlib.XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &value) {
+		return dpi
+	}
 
 	dpi_str := string(cstring(value.addr))
-	dpi := f32(strconv.atof(dpi_str))
+	dpi = f32(strconv.atof(dpi_str))
 	if dpi == 0 {
 		return 96
 	}
