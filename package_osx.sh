@@ -1,8 +1,20 @@
-rm -rf bin/spall.app
-mkdir bin/spall.app
-mkdir bin/spall.app/Contents
-mkdir bin/spall.app/Contents/MacOS
-mkdir bin/spall.app/Contents/resources
-cp bin/spall bin/spall.app/Contents/MacOS/.
-cp resources/info.plist bin/spall.app/Contents/.
-cp resources/icon.icns bin/spall.app/Contents/resources/
+if [[ "$1" == "" ]]; then
+	APP_PATH="./bin/spall.app"
+else
+	APP_PATH="$1"
+fi
+
+if [[ "$2" == "" ]]; then
+	SPALL_PATH="./bin/spall"
+else
+	SPALL_PATH="$2"
+fi
+
+rm -rf $APP_PATH
+mkdir $APP_PATH
+mkdir $APP_PATH/Contents
+mkdir $APP_PATH/Contents/MacOS
+mkdir $APP_PATH/Contents/resources
+cp $SPALL_PATH $APP_PATH/Contents/MacOS/.
+cp resources/info.plist $APP_PATH/Contents/.
+cp resources/icon.icns $APP_PATH/Contents/resources/.

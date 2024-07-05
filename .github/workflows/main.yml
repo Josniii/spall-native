@@ -179,6 +179,11 @@ jobs:
         
       - name: Package artifacts
         run: |
+          curl -L -o lipo https://github.com/konoui/lipo/releases/latest/download/lipo_Linux_amd64
+          chmod +x lipo
+          ./lipo -create -output spall_osx spall_osx_arm/spall spall_osx_x86/spall
+          ./package_osx.sh spall_pkg/spall.app spall_osx
+
           mkdir spall_pkg
           cp resources/FiraCode_LICENSE.txt spall_pkg/.
           cp resources/LICENSE.txt          spall_pkg/.
@@ -191,8 +196,6 @@ jobs:
           cp -r spall_web/examples/*        spall_pkg/examples/.
           cp -r examples/*                  spall_pkg/examples/.
           cp spall_linux/spall              spall_pkg/spall_linux
-          cp spall_osx_x86/spall            spall_pkg/spall_osx_x86
-          cp spall_osx_arm/spall            spall_pkg/spall_osx_arm
           cp spall_windows/spall.exe        spall_pkg/spall_windows.exe
           echo "DATE=$(date '+%Y_%m_%d')" >> $GITHUB_ENV
 
