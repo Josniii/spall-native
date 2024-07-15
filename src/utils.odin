@@ -116,6 +116,10 @@ tens_fmt :: proc(x: u64, allocator := context.temp_allocator) -> string {
 	val_buf := [32]u8{}
 	chars := [?]u8{'0', '1', '2', '3', '4', '5' , '6', '7', '8', '9'}
 
+	if x == 0 {
+		return strings.clone("0", allocator)
+	}
+
 	tmp := x
 	pos := 0
 	for tmp := x; tmp != 0; pos += 1 {

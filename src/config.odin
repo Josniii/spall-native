@@ -14,6 +14,7 @@ import "core:strings"
 import "formats:spall_fmt"
 
 FileType :: enum {
+	Invalid,
 	Json,
 	ManualStreamV1,
 	ManualStreamV2,
@@ -633,7 +634,15 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 
 		file_type = .AutoStream
 	} else {
-		file_type = .Json
+		leading_char := header_buffer[0]
+		if leading_char == ' '  || leading_char == '\n' ||
+		   leading_char == '\r' || leading_char == '\t' ||
+		   leading_char == '{'  || leading_char == '[' {
+			file_type = .Json
+		} else {
+			file_type = .Invalid
+			post_error(trace, "%s is an unsupported file type!", file_name)
+		}
 	}
 
 	p := &trace.parser
@@ -651,7 +660,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		parsed_properly = json_parse(trace, trace_fd)
 	}
 
-	if p.pos == i64(header_size) || trace.event_count == 0 {
+	if parsed_properly && (p.pos == i64(header_size) || trace.event_count == 0) {
 		parsed_properly = false
 		post_error(trace, "Trace is empty, did you remember to quit your threads and enable -finstrument-functions?")
 	}
