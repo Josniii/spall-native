@@ -569,12 +569,13 @@ draw_rect_tooltip :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) 
 	if ev.has_addr {
 		file, line, ok := get_line_info(trace, ev.args)
 		if ok {
-			called_loc = fmt.tprintf("call site %s:%d", file, line)
+			called_loc = fmt.tprintf("%s:%d", file, line)
 			info_width := measure_text(called_loc, .PSize, .DefaultFont)
 			rect_width = max(rect_width, info_width + em)
 			next_line(&rect_height, em)
 		}
 
+/*
 		file, line, ok = get_line_info(trace, ev.id)
 		if ok {
 			defined_loc = fmt.tprintf("definition %s:%d", file, line)
@@ -582,6 +583,7 @@ draw_rect_tooltip :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) 
 			rect_width = max(rect_width, info_width + em)
 			next_line(&rect_height, em)
 		}
+*/
 	} else if ev.args > 0 {
 		args = in_getstr(&trace.string_block, ev.args)
 		args_width := measure_text(args, .PSize, .DefaultFont)
