@@ -5,6 +5,9 @@ import "core:fmt"
 import "core:strings"
 import "core:slice"
 import "core:encoding/varint"
+import "core:reflect"
+
+LOG_SPAM := false
 
 Sections :: struct {
 	debug_str:   []u8,
@@ -320,7 +323,7 @@ Dw_Tag :: enum {
 }
 
 DWARF32_V5_Line_Header :: struct #packed {
-	address_size:           u8,
+	addr_size:           u8,
 	segment_selector_size:  u8,
 	header_length:         u32,
 	min_inst_length:        u8,
@@ -352,7 +355,7 @@ DWARF32_V3_Line_Header :: struct #packed {
 
 DWARF_Line_Header :: struct {
 	header_length:        u32,
-	address_size:          u8,
+	addr_size:          u8,
 	segment_selector_size: u8,
 	min_inst_length:       u8,
 	max_ops_per_inst:      u8,
@@ -364,23 +367,23 @@ DWARF_Line_Header :: struct {
 
 DWARF32_V3_CU_Header :: struct #packed {
 	abbrev_offset: u32,
-	address_size: u8,
+	addr_size: u8,
 }
 
 DWARF32_V4_CU_Header :: struct #packed {
 	abbrev_offset: u32,
-	address_size: u8,
+	addr_size: u8,
 }
 
 DWARF32_V5_CU_Header :: struct #packed {
 	unit_type: Dw_Unit_Type,
-	address_size: u8,
+	addr_size: u8,
 	abbrev_offset: u32,
 }
 
 DWARF_CU_Header :: struct {
 	unit_type: Dw_Unit_Type,
-	address_size: u8,
+	addr_size: int,
 	abbrev_offset: u32,
 }
 
@@ -433,21 +436,53 @@ DWARF_Context :: struct {
 	addr_size: int,
 }
 
+dw_addr       :: distinct u64
+dw_addrx      :: distinct u64
+dw_block      :: distinct []u8
+dw_udata      :: distinct u64
+dw_data16     :: distinct []u8
+dw_sdata      :: distinct i64
+dw_exprloc    :: distinct []u8
+dw_flag       :: distinct bool
+dw_sec_offset :: distinct u64
+dw_ref        :: distinct u64
+dw_ref_addr   :: distinct u64
+dw_str        :: distinct cstring
+dw_strp       :: distinct u64
+dw_strx       :: distinct u64
+dw_line_strp  :: distinct u64
+dw_loclistx   :: distinct u64
+dw_rnglistx   :: distinct u64
+
 Attr_Data :: union {
-	[]u8,
-	i64,
-	u64,
-	u32,
-	u16,
-	u8,
-	string,
-	cstring,
-	bool,
+	dw_addr,
+	dw_addrx,
+	dw_block,
+	dw_udata,
+	dw_data16,
+	dw_sdata,
+	dw_exprloc,
+	dw_flag,
+	dw_sec_offset,
+	dw_ref,
+	dw_ref_addr,
+	dw_str,
+	dw_strp,
+	dw_strx,
+	dw_line_strp,
+	dw_loclistx,
+	dw_rnglistx,
+}
+
+Attr_Result :: struct {
+	id: Dw_At,
+	val: Attr_Data,
 }
 
 Attr_Entry :: struct {
-	form: Dw_Form,
-	data: Attr_Data,
+	attr_id: Dw_At,
+	form_id: Dw_Form,
+	extra: u64,
 }
 
 Abbrev_Unit :: struct {
@@ -456,11 +491,15 @@ Abbrev_Unit :: struct {
 	type: Dw_Tag,
 
 	has_children: bool,
-	attrs_buf: []u8,
+	attrs: [dynamic]Attr_Entry,
 }
 
 CU_Unit :: struct {
+	low_pc: u64,
+	offset: u64,
+	idx:    u64,
 	abbrevs: []Abbrev_Unit,
+
 	str_offsets_base: u64,
 	addr_base:  u64,
 	rnglists_base: u64,
@@ -471,179 +510,86 @@ Function_Unit :: struct {
 	name: cstring,
 	has_pc: bool,
 
-	low_pc:  u64,
-	high_pc: u64,
+	low_pc:     u64,
+	high_pc:    u64,
 	ranges_off: u64,
+	entry_pc:   u64,
 
 	origin: u64,
 	specification: u64,
 }
 
-parse_abbrev_attrs :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, fu: ^Function_Unit, idx: int) -> (ret_size: int, child_level: int, au_is_function: bool) {
-	i := idx
+init_abbrevs :: proc(ctx: ^DWARF_Context, au_offset_map: ^map[int][dynamic]Abbrev_Unit) {
+	cu_start := 0
 
-	abbrev_id, size, ok := read_uleb(ctx.sections.info[i:])
-	if !ok {
-		panic("%s\n", #location())
-	}
-	i += size
+	au_offset_map[cu_start] = make([dynamic]Abbrev_Unit)
+	abbrevs := &au_offset_map[cu_start]
 
-	if abbrev_id == 0 {
-		return size, -1, false
-	}
-
-	abbrev_idx := abbrev_id - 1
-	if abbrev_idx < 0 || abbrev_idx >= u64(len(cu.abbrevs)) {
-		fmt.printf("tried to get invalid abbrev id: %v\n", abbrev_idx)
-		panic("%s\n", #location())
-	}
-	au := &cu.abbrevs[abbrev_idx]
-
-	is_function := au.type == .subprogram || au.type == .inlined_subroutine || au.type == .entry_point
-	for j := 0; j < len(au.attrs_buf); {
-		attr_name, size, ok := read_uleb(au.attrs_buf[j:])
+	fmt.printf("DWARF: parsing debug_abbrev\n")
+	for i := 0; i < len(ctx.sections.abbrev); {
+		abbrev_code, size, ok := read_uleb(ctx.sections.abbrev[i:])
 		if !ok {
 			panic("%s\n", #location())
 		}
-		j += size
+		i += size
 
-		attr_form, size2, ok2 := read_uleb(au.attrs_buf[j:])
+		// got a NULL abbrev
+		if abbrev_code == 0 {
+			cu_start = i
+
+			au_offset_map[cu_start] = make([dynamic]Abbrev_Unit)
+			abbrevs = &au_offset_map[cu_start]
+			continue
+		}
+
+		entry := Abbrev_Unit{}
+		entry.id = abbrev_code
+		entry.attrs = make([dynamic]Attr_Entry)
+
+		entry_type, size2, ok2 := read_uleb(ctx.sections.abbrev[i:])
 		if !ok2 {
 			panic("%s\n", #location())
 		}
-		j += size2
+		i += size2
 
-		if attr_name == 0 && attr_form == 0 {
-			break
-		}
+		entry.type = Dw_Tag(entry_type)
+		entry.has_children = ctx.sections.abbrev[i] > 0
+		i += 1
 
-		attr_code := Dw_Form(attr_form)
-		data, skip_size, ok3 := parse_attr_data(ctx, cu, attr_code, ctx.sections.info[i:], au.attrs_buf[j:])
-		if !ok3 {
-			fmt.printf("failed to parse %v\n", attr_code)
-			panic("%s\n", #location())
-		}
+		// get the size of attributes list for an abbrev
+		attrs_start := i
+		for i < len(ctx.sections.abbrev) {
+			attr_id, size, ok := read_uleb(ctx.sections.abbrev[i:])
+			if !ok {
+				panic("%s\n", #location())
+			}
+			i += size
 
-		attr_field := Dw_At(attr_name)
-		attr_val := Attr_Entry{form = Dw_Form(attr_form), data = data}
-		if au.type == .compile_unit {
-			#partial switch attr_field {
-			case .frame_base:
-				cu.frame_base, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .addr_base:
-				cu.addr_base, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .rnglists_base:
-				cu.rnglists_base, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .loclists_base:
-				cu.loclists_base, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .str_offsets_base:
-				cu.str_offsets_base, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
+			form_id, size2, ok2 := read_uleb(ctx.sections.abbrev[i:])
+			if !ok2 {
+				panic("%s\n", #location())
+			}
+			i += size2
+
+			// 0, 0 means we've hit the end of the list of attributes
+			if attr_id == 0 && form_id == 0 {
+				break
 			}
 
-			//fmt.printf("\tattr: %v (%v)\n", attr_field, attr_val)
-		} else if is_function {
-			#partial switch attr_field {
-			case .name:
-				fu.name, ok = attr_val.data.(cstring)
-				assert(ok)
-			case .low_pc:
-				fu.has_pc = true
-				fu.low_pc, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .high_pc:
-				fu.has_pc = true
-				fu.high_pc, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .abstract_origin:
-				fu.origin, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .ranges:
-				fu.has_pc = true
-				fu.ranges_off, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
-			case .specification:
-				fu.specification, ok = normalize_unum(ctx, cu, attr_val)
-				assert(ok)
+			extra_val : i64 = 0
+			// implicit const is stored in the attribute. Oh boy.
+			if Dw_Form(form_id) == .implicit_const {
+				extra_val, size, ok = read_ileb(ctx.sections.abbrev[i:])
+				if !ok {
+					panic("%s\n", #location())
+				}
+				i += size
 			}
-
-			//fmt.printf("\tattr: %v (%v)\n", attr_field, attr_val)
+			attr := Attr_Entry{form_id = Dw_Form(form_id), attr_id = Dw_At(attr_id), extra = u64(extra_val)}
+			non_zero_append(&entry.attrs, attr)
 		}
 
-		// implicit const lives in the attr buffer, rather than in the .debug_info
-		if attr_code == .implicit_const {
-			j += skip_size
-		} else {
-			i += skip_size
-		}
-	}
-
-	child_adj := 0
-	if au.has_children {
-		child_adj = +1
-	}
-	return i - idx, child_adj, is_function
-}
-
-print_abbrev_attrs :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, idx: int) {
-	i := idx
-
-	abbrev_id, size, ok := read_uleb(ctx.sections.info[i:])
-	if !ok {
-		panic("%s\n", #location())
-	}
-	i += size
-
-	if abbrev_id == 0 {
-		return
-	}
-
-	abbrev_idx := abbrev_id - 1
-	if abbrev_idx < 0 || abbrev_idx >= u64(len(cu.abbrevs)) {
-		fmt.printf("tried to get invalid abbrev id: %v\n", abbrev_idx)
-		panic("%s\n", #location())
-	}
-	au := &cu.abbrevs[abbrev_idx]
-
-	fmt.printf("[0x%08x]\n", idx)
-	for j := 0; j < len(au.attrs_buf); {
-		attr_name, size, ok := read_uleb(au.attrs_buf[j:])
-		if !ok {
-			panic("%s\n", #location())
-		}
-		j += size
-
-		attr_form, size2, ok2 := read_uleb(au.attrs_buf[j:])
-		if !ok2 {
-			panic("%s\n", #location())
-		}
-		j += size2
-
-		if attr_name == 0 && attr_form == 0 {
-			break
-		}
-
-		attr_code := Dw_Form(attr_form)
-		data, skip_size, ok3 := parse_attr_data(ctx, cu, attr_code, ctx.sections.info[i:], au.attrs_buf[j:])
-		if !ok3 {
-			fmt.printf("failed to parse %v\n", attr_code)
-			panic("%s\n", #location())
-		}
-
-		attr_field := Dw_At(attr_name)
-		attr_val := Attr_Entry{form = Dw_Form(attr_form), data = data}
-		fmt.printf("\tattr: %v (%v)\n", attr_field, attr_val)
-
-		// implicit const lives in the attr buffer, rather than in the .debug_info
-		if attr_code == .implicit_const {
-			j += skip_size
-		} else {
-			i += skip_size
-		}
+		non_zero_append(abbrevs, entry)
 	}
 
 	return
@@ -659,89 +605,333 @@ read_debug_addr :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: u64) -> (u64, bo
 	return val, ok
 }
 
-normalize_unum :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attr_val: Attr_Entry) -> (u64, bool) {
-	#partial switch attr_val.form {
-	case .data1:
-		v, ok := attr_val.data.(u8)
-		return u64(v), ok
-	case .data2:
-		v, ok := attr_val.data.(u16)
-		return u64(v), ok
-	case .data4:
-		v, ok := attr_val.data.(u32)
-		return u64(v), ok
-	case .data8:
-		v, ok := attr_val.data.(u64)
-		return v, ok
-
-	case .ref1:
-		v, ok := attr_val.data.(u8)
-		return u64(v), ok
-	case .ref2:
-		v, ok := attr_val.data.(u16)
-		return u64(v), ok
-	case .ref4:
-		v, ok := attr_val.data.(u32)
-		return u64(v), ok
-	case .ref8:
-		v, ok := attr_val.data.(u64)
-		return v, ok
-	case .ref_udata:
-		v, ok := attr_val.data.(u64)
-		return v, ok
-
-	case .sec_offset:
-		ret : u64 = 0
-		ret_ok := false
-		if ctx.bits_64 {
-			v, ok := attr_val.data.(u64)
-			ret = u64(v)
-			ret_ok = ok
-		} else {
-			v, ok := attr_val.data.(u32)
-			ret = u64(v)
-			ret_ok = ok
+get_attr :: proc(attrs: []Attr_Result, id: Dw_At) -> Attr_Data {
+	for attr in attrs {
+		if attr.id == id {
+			return attr.val
 		}
-		return ret, ret_ok
-	case .ref_addr:
-		ret : u64 = 0
-		ret_ok := false
-		if ctx.bits_64 {
-			v, ok := attr_val.data.(u64)
-			ret = u64(v)
-			ret_ok = ok
-		} else {
-			v, ok := attr_val.data.(u32)
-			ret = u64(v)
-			ret_ok = ok
-		}
-		return ret, ret_ok
+	}
 
-	// This should be machine-arch dependant, will break on 32-bit binaries
-	case .addr:
-		v, ok := attr_val.data.(u64)
-		return v, ok
+	return nil
+}
 
-	case .addrx:
-		v, ok := attr_val.data.(u64)
-		if !ok { return v, ok }
+get_attr_ref :: proc(ctx: ^DWARF_Context, attrs: []Attr_Result, id: Dw_At, cur_cu_offset: int) -> (addr: u64, ok: bool) {
+	val := get_attr(attrs[:], id)
+	if val == nil {
+		return
+	}
 
-		v2, ok2 := read_debug_addr(ctx, cu, v)
-		return v2, ok2
-
-	// This is wrong
-	case .rnglistx:
-		v, ok := attr_val.data.(u64)
-		return v, ok
-
+	#partial switch v in val {
+	case dw_ref:
+		return u64(cur_cu_offset) + u64(v), true
+	case dw_ref_addr:
+		return u64(v), true
 	case:
-		fmt.printf("FAILED TO PARSE: %v\n", attr_val)
-		return 0, false
+		return
 	}
 }
 
-parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, ranges_off: u64) -> u64 {
+get_attr_addr :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id: Dw_At) -> (addr: u64, ok: bool) {
+	val := get_attr(attrs[:], id)
+	if val == nil {
+		return
+	}
+
+	#partial switch v in val {
+	case dw_addr:
+		return u64(v), true
+	case dw_addrx:
+		return read_debug_addr(ctx, cu, u64(v))
+	case:
+		return
+	}
+}
+
+get_attr_str :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id: Dw_At) -> string {
+	val := get_attr(attrs[:], id)
+	if val == nil {
+		return ""
+	}
+
+	str_offsets := ctx.sections.str_offsets
+	debug_str := ctx.sections.debug_str
+
+	#partial switch v in val {
+	case dw_str:
+		if v == "" { return "" }
+		return strings.clone_from_cstring(cstring(v), context.temp_allocator)
+	case dw_strp:
+		str := cstring(raw_data(ctx.sections.debug_str[v:]))
+		if str == "" { return "" }
+		return strings.clone_from_cstring(str, context.temp_allocator)
+	case dw_strx:
+		idx := u64(v)
+
+		if cu.str_offsets_base == 0 { return "" }
+
+		if ctx.bits_64 {
+			off_off := cu.str_offsets_base + (8 * idx)
+			if (off_off + 8) > u64(len(str_offsets)) { return "" }
+
+			off, ok := slice_to_type(str_offsets[off_off:], u64)
+			if !ok { return "" }
+
+			str := cstring(raw_data(debug_str[off:]))
+			if str == "" { return "" }
+
+			return strings.clone_from_cstring(str, context.temp_allocator)
+		} else {
+			off_off := cu.str_offsets_base + (4 * idx)
+			if (off_off + 4) > u64(len(str_offsets)) { return "" }
+
+			off, ok := slice_to_type(str_offsets[off_off:], u32)
+			if !ok { return "" }
+
+			str := cstring(raw_data(debug_str[off:]))
+			if str == "" { return "" }
+
+			return strings.clone_from_cstring(str, context.temp_allocator)
+		}
+	case dw_line_strp:
+		str := cstring(raw_data(ctx.sections.line_str[v:]))
+		if str == "" { return "" }
+		return strings.clone_from_cstring(str, context.temp_allocator)
+	case:
+		fmt.printf("Failed to parse string!\n")
+		return ""
+	}
+}
+
+get_offset :: proc(ctx: ^DWARF_Context, buffer: []u8) -> (v: u64, size: int, ok: bool) {
+	if ctx.bits_64 {
+		v := slice_to_type(buffer, u64) or_return
+		return v, size_of(u64), true
+	} else {
+		v := slice_to_type(buffer, u32) or_return
+		return u64(v), size_of(u32), true
+	}
+}
+
+get_addr :: proc(ctx: ^DWARF_Context, buffer: []u8) -> (v: u64, size: int, ok: bool) {
+	if ctx.addr_size == 8 {
+		v := slice_to_type(buffer, u64) or_return
+		return v, size_of(u64), true
+	} else {
+		v := slice_to_type(buffer, u32) or_return
+		return u64(v), size_of(u32), true
+	}
+}
+
+parse_attr :: proc(ctx: ^DWARF_Context, buffer: []u8, attr: Attr_Entry) -> (ret: Attr_Data, size: int, ok: bool) {
+	#partial switch attr.form_id {
+	case .addr:
+		v, size := get_addr(ctx, buffer) or_return
+		return Attr_Data(dw_addr(v)), size, true
+	case .addrx1:
+		v := slice_to_type(buffer, u8) or_return
+		return Attr_Data(dw_addrx(v)), size_of(u8), true
+	case .addrx2:
+		v := slice_to_type(buffer, u16) or_return
+		return Attr_Data(dw_addrx(v)), size_of(u16), true
+	case .addrx4:
+		v := slice_to_type(buffer, u32) or_return
+		return Attr_Data(dw_addrx(v)), size_of(u32), true
+	case .addrx:
+		v, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_addrx(v)), size, true
+
+	case .block1:
+		len := slice_to_type(buffer, u8) or_return
+		return Attr_Data(dw_block(buffer[:len])), size_of(u8) + int(len), true
+	case .block2:
+		len := slice_to_type(buffer, u16) or_return
+		return Attr_Data(dw_block(buffer[:len])), size_of(u16) + int(len), true
+	case .block4:
+		len := slice_to_type(buffer, u32) or_return
+		return Attr_Data(dw_block(buffer[:len])), size_of(u32) + int(len), true
+	case .block:
+		len, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_block(buffer[:len])), size + int(len), true
+
+	case .data1:
+		v := slice_to_type(buffer, u8) or_return
+		return Attr_Data(dw_udata(v)), size_of(u8), true
+	case .data2:
+		v := slice_to_type(buffer, u16) or_return
+		return Attr_Data(dw_udata(v)), size_of(u16), true
+	case .data4:
+		v := slice_to_type(buffer, u32) or_return
+		return Attr_Data(dw_udata(v)), size_of(u32), true
+	case .data8:
+		v := slice_to_type(buffer, u64) or_return
+		return Attr_Data(dw_udata(v)), size_of(u64), true
+	case .data16:
+		return Attr_Data(dw_data16(buffer[:16])), 16, true
+	case .udata:
+		v, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_udata(v)), size, true
+	case .sdata:
+		v, size := read_ileb(buffer) or_return
+		return Attr_Data(dw_sdata(v)), size, true
+
+	case .exprloc:
+		len, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_exprloc(buffer[:len])), size + int(len), true
+
+	case .flag:
+		v := slice_to_type(buffer, u8) or_return
+		return Attr_Data(dw_flag(v != 0)), size_of(u8), true
+	case .flag_present:
+		return Attr_Data(dw_flag(true)), 0, true
+
+	case .sec_offset:
+		v, size := get_offset(ctx, buffer) or_return
+		return Attr_Data(dw_sec_offset(v)), size, true
+
+	case .ref1:
+		v := slice_to_type(buffer, u8) or_return
+		return Attr_Data(dw_ref(v)), size_of(u8), true
+	case .ref2:
+		v := slice_to_type(buffer, u16) or_return
+		return Attr_Data(dw_ref(v)), size_of(u16), true
+	case .ref4:
+		v := slice_to_type(buffer, u32) or_return
+		return Attr_Data(dw_ref(v)), size_of(u32), true
+	case .ref8:
+		v := slice_to_type(buffer, u64) or_return
+		return Attr_Data(dw_ref(v)), size_of(u64), true
+	case .ref_udata:
+		v, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_ref(v)), size, true
+
+	case .ref_addr:
+		v, size := get_offset(ctx, buffer) or_return
+		return Attr_Data(dw_ref_addr(v)), size, true
+	case .ref_sig8:
+		v := slice_to_type(buffer, u64) or_return
+		return Attr_Data(dw_ref(v)), size_of(u64), true
+
+	case .str:
+		str := cstring(raw_data(buffer))
+		return Attr_Data(dw_str(str)), len(str)+1, true
+	case .strp:
+		v, size := get_offset(ctx, buffer) or_return
+		return Attr_Data(dw_strp(v)), size, true
+	case .strx1:
+		v := slice_to_type(buffer, u8) or_return
+		return Attr_Data(dw_strx(v)), size_of(u8), true
+	case .strx2:
+		v := slice_to_type(buffer, u16) or_return
+		return Attr_Data(dw_strx(v)), size_of(u16), true
+	case .strx4:
+		v := slice_to_type(buffer, u32) or_return
+		return Attr_Data(dw_strx(v)), size_of(u32), true
+	case .strx:
+		v, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_strx(v)), size, true
+	case .line_strp:
+		v, size := get_offset(ctx, buffer) or_return
+		return Attr_Data(dw_line_strp(v)), size, true
+
+	/*
+	case .indirect:
+		v, size := read_uleb(buffer) or_return
+		v2, sz2 := parse_attr(ctx, buffer[size:], Attr_Entry{form_id = attr.extra}) or_return
+		return v2, size+sz2, true
+	*/
+
+	case .implicit_const:
+		return Attr_Data(dw_sdata(attr.extra)), 0, true
+
+	case .loclistx:
+		v, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_loclistx(v)), size, true
+	case .rnglistx:
+		v, size := read_uleb(buffer) or_return
+		return Attr_Data(dw_rnglistx(v)), size, true
+	}
+
+	return
+}
+
+attr_get_u64 :: proc(val: Attr_Data) -> (ret: u64, ok: bool) {
+	#partial switch v in val {
+	case dw_udata:
+		return u64(v), true
+	case dw_sdata:
+		return u64(v), true
+	case dw_sec_offset:
+		return u64(v), true
+	case: return
+	}
+}
+
+DIE_Parse_State :: enum {
+	Pass,
+	Fail,
+	Skip,
+}
+
+parse_die :: proc(ctx: ^DWARF_Context, buffer: []u8, abbrevs: []Abbrev_Unit, out_attrs: ^[dynamic]Attr_Result) -> (au_idx: int, sz: int, ret: DIE_Parse_State) {
+	i := 0
+	abbrev_code, size, ok := read_uleb(buffer[i:])
+	if !ok {
+		return 0, 0, .Fail
+	}
+	i += size
+
+	if abbrev_code == 0 {
+		return 0, i, .Skip
+	}
+
+	abbrev_idx := abbrev_code - 1
+	if abbrev_idx < 0 || abbrev_idx > u64(len(abbrevs)) {
+		fmt.printf("Invalid AU idx | %v\n", abbrev_idx)
+		return 0, 0, .Fail
+	}
+	au := abbrevs[abbrev_idx]
+	if au.id != abbrev_code {
+		fmt.printf("Invalid AU idx\n")
+		return 0, 0, .Fail
+	}
+
+	for attr in au.attrs {
+		v, size, ok := parse_attr(ctx, buffer[i:], attr)
+		if !ok {
+			return 0, 0, .Fail
+		}
+
+		append(out_attrs, Attr_Result{attr.attr_id, v})
+		i += size
+	}
+
+
+	return int(abbrev_idx), i, .Pass
+}
+
+parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> (low_pc: u64, ok: bool) {
 	new_low := max(u64)
+
+	ranges_off : u64 = 0
+	#partial switch v in val {
+	case dw_sec_offset: ranges_off = u64(v)
+	case dw_udata:      ranges_off = u64(v)
+
+	case dw_rnglistx:
+		if ctx.bits_64 {
+			offset_loc := cu.rnglists_base + (8 * u64(v))
+			if (offset_loc + 8) > u64(len(ctx.sections.rnglists)) { return }
+			offset := slice_to_type(ctx.sections.rnglists, u64) or_return
+			ranges_off = cu.rnglists_base + offset
+		} else {
+			offset_loc := cu.rnglists_base + (4 * u64(v))
+			if (offset_loc + 4) > u64(len(ctx.sections.rnglists)) { return }
+			offset := slice_to_type(ctx.sections.rnglists, u32) or_return
+			ranges_off = cu.rnglists_base + u64(offset)
+		}
+	case:
+		return
+	}
 
 	switch ctx.version {
 	case 5:
@@ -751,92 +941,87 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, ranges_off: u64) ->
 
 		rnglist := ctx.sections.rnglists[ranges_off:]
 
-		base_addr : u64 = 0
+		base_addr : u64 = cu.low_pc
 
 		i := 0
 		still_scanning := true
 		for still_scanning {
-			type, ok := slice_to_type(rnglist[i:], Dw_RLE); i += 1
-			assert(ok)
+			type := slice_to_type(rnglist[i:], Dw_RLE) or_return
+			i += 1
 
 			#partial switch type {
 			case .end_of_list:
 				still_scanning = false
 
 			case .base_addressx:
-				idx, leb_size, ok := read_uleb(rnglist[i:]); i += leb_size
-				assert(ok)
+				idx, leb_size := read_uleb(rnglist[i:]) or_return
+				i += leb_size
 
-				addr, ok2 := read_debug_addr(ctx, cu, idx)
-				assert(ok2)
+				addr := read_debug_addr(ctx, cu, idx) or_return
 
-				fmt.printf("\t%v | base: 0x%x\n", type, addr)
+				if LOG_SPAM { fmt.printf("\t%v | base: 0x%x\n", type, addr) }
 				base_addr = addr
 
 			case .startx_endx:
-				start_idx, leb_size, ok := read_uleb(rnglist[i:]); i += leb_size
-				assert(ok)
+				start_idx, leb_size := read_uleb(rnglist[i:]) or_return
+				i += leb_size
 
-				end_idx, leb_size2, ok2 := read_uleb(rnglist[i:]); i += leb_size2
-				assert(ok2)
+				end_idx, leb_size2 := read_uleb(rnglist[i:]) or_return
+				i += leb_size2
 				
-				low_pc, ok3 := read_debug_addr(ctx, cu, start_idx)
-				assert(ok3)
+				low_pc := read_debug_addr(ctx, cu, start_idx) or_return
+				high_pc := read_debug_addr(ctx, cu, end_idx) or_return
 
-				high_pc, ok4 := read_debug_addr(ctx, cu, end_idx)
-				assert(ok4)
-
-				fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, high_pc)
+				if LOG_SPAM { fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, high_pc) }
 				new_low = min(new_low, low_pc)
 
 			case .startx_length:
-				start_idx, leb_size, ok := read_uleb(rnglist[i:]); i += leb_size
-				assert(ok)
+				start_idx, leb_size := read_uleb(rnglist[i:]) or_return
+				i += leb_size
 
-				length, leb_size2, ok2 := read_uleb(rnglist[i:]); i += leb_size2
-				assert(ok2)
+				length, leb_size2 := read_uleb(rnglist[i:]) or_return
+				i += leb_size2
 
-				low_pc, ok3 := read_debug_addr(ctx, cu, start_idx)
-				assert(ok3)
+				low_pc := read_debug_addr(ctx, cu, start_idx) or_return
 
-				fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, low_pc + length)
+				if LOG_SPAM { fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, low_pc + length) }
 				new_low = min(new_low, low_pc)
 
 			case .offset_pair:
-				low_pc, leb_size, ok := read_uleb(rnglist[i:]); i += leb_size
-				assert(ok)
+				low_pc, leb_size := read_uleb(rnglist[i:]) or_return
+				i += leb_size
 
-				high_pc, leb_size2, ok2 := read_uleb(rnglist[i:]); i += leb_size2
-				assert(ok2)
+				high_pc, leb_size2 := read_uleb(rnglist[i:]) or_return
+				i += leb_size2
 
-				fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, high_pc)
+				if LOG_SPAM { fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, high_pc) }
 				new_low = min(new_low, low_pc)
 
 			case .base_address:
-				addr, ok := slice_to_type(rnglist[i:], u64); i += size_of(u64)
-				assert(ok)
+				addr := slice_to_type(rnglist[i:], u64) or_return
+				i += size_of(u64)
 				
-				fmt.printf("\t%v | base: 0x%x\n", type, addr)
+				if LOG_SPAM { fmt.printf("\t%v | base: 0x%x\n", type, addr) }
 				base_addr = addr
 
 			case .start_end:
-				low_pc, ok := slice_to_type(rnglist[i:], u64); i += size_of(u64)
-				assert(ok)
+				low_pc := slice_to_type(rnglist[i:], u64) or_return
+				i += size_of(u64)
 
-				high_pc, ok2 := slice_to_type(rnglist[i:], u64); i += size_of(u64)
-				assert(ok2)
+				high_pc := slice_to_type(rnglist[i:], u64) or_return
+				i += size_of(u64)
 				
-				fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, high_pc)
+				if LOG_SPAM { fmt.printf("\t%v | 0x%x -> 0x%x\n", type, low_pc, high_pc) }
 				new_low = min(new_low, low_pc)
 
 			case .start_length:
-				addr, ok := slice_to_type(rnglist[i:], u64); i += size_of(u64)
-				assert(ok)
+				addr := slice_to_type(rnglist[i:], u64) or_return
+				i += size_of(u64)
 
-				length, leb_size, ok2 := read_uleb(rnglist[i:]); i += leb_size
-				assert(ok2)
+				length, leb_size := read_uleb(rnglist[i:]) or_return
+				i += leb_size
 
-				fmt.printf("\t%v | 0x%x -> 0x%x\n", type, addr, addr+length)
+				if LOG_SPAM { fmt.printf("\t%v | 0x%x -> 0x%x\n", type, base_addr + addr, base_addr + addr + length) }
 				new_low = min(new_low, addr)
 
 			case:
@@ -856,11 +1041,11 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, ranges_off: u64) ->
 		i := 0
 		still_scanning := true
 		for still_scanning {
-			low_pc, ok := slice_to_type(ranges[i:], u64); i += size_of(u64)
-			assert(ok)
+			low_pc := slice_to_type(ranges[i:], u64) or_return
+			i += size_of(u64)
 
-			high_pc, ok2 := slice_to_type(ranges[i:], u64); i += size_of(u64)
-			assert(ok2)
+			high_pc := slice_to_type(ranges[i:], u64) or_return
+			i += size_of(u64)
 
 			if (low_pc == 0 && high_pc == 0) || (low_pc == high_pc) {
 				still_scanning = false
@@ -873,7 +1058,7 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, ranges_off: u64) ->
 		panic("Ranges for DWARF %v not supported!\n", ctx.version)
 	}
 
-	return new_low
+	return new_low, true
 }
 
 parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header, int, bool) {
@@ -886,7 +1071,7 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 		}
 
 		common_hdr.header_length         = hdr.header_length
-		common_hdr.address_size          = hdr.address_size
+		common_hdr.addr_size             = hdr.addr_size
 		common_hdr.segment_selector_size = hdr.segment_selector_size
 		common_hdr.min_inst_length       = hdr.min_inst_length
 		common_hdr.max_ops_per_inst      = hdr.max_ops_per_inst
@@ -903,7 +1088,7 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 		}
 
 		common_hdr.header_length         = hdr.header_length
-		common_hdr.address_size          = 4
+		common_hdr.addr_size             = 4
 		common_hdr.segment_selector_size = 0
 		common_hdr.min_inst_length       = hdr.min_inst_length
 		common_hdr.max_ops_per_inst      = hdr.max_ops_per_inst
@@ -920,7 +1105,7 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 		}
 
 		common_hdr.header_length         = hdr.header_length
-		common_hdr.address_size          = 4
+		common_hdr.addr_size             = 4
 		common_hdr.segment_selector_size = 0
 		common_hdr.min_inst_length       = hdr.min_inst_length
 		common_hdr.max_ops_per_inst      = 0
@@ -945,7 +1130,7 @@ parse_cu_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_CU_Header, in
 		}
 
 		common_hdr.unit_type = Dw_Unit_Type(hdr.unit_type)
-		common_hdr.address_size = hdr.address_size
+		common_hdr.addr_size = int(hdr.addr_size)
 		common_hdr.abbrev_offset = hdr.abbrev_offset
 
 		if common_hdr.unit_type != .compile {
@@ -960,7 +1145,7 @@ parse_cu_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_CU_Header, in
 			return {}, 0, false
 		}
 
-		common_hdr.address_size = hdr.address_size
+		common_hdr.addr_size = int(hdr.addr_size)
 		common_hdr.abbrev_offset = hdr.abbrev_offset
 
 		return common_hdr, size_of(hdr), true
@@ -970,7 +1155,7 @@ parse_cu_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_CU_Header, in
 			return {}, 0, false
 		}
 
-		common_hdr.address_size = hdr.address_size
+		common_hdr.addr_size = int(hdr.addr_size)
 		common_hdr.abbrev_offset = hdr.abbrev_offset
 
 		return common_hdr, size_of(hdr), true
@@ -979,128 +1164,11 @@ parse_cu_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_CU_Header, in
 	}
 }
 
-parse_attr_data :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, form: Dw_Form, data, abbrev_buffer: []u8) -> (entry: Attr_Data, size: int, ok: bool) {
-	str_buffer := ctx.sections.debug_str
-	str_offsets_buffer := ctx.sections.str_offsets[cu.str_offsets_base:]
-	line_str_buffer := ctx.sections.line_str
-
-	#partial switch form {
-	case Dw_Form.str:
-		str := cstring(raw_data(data))
-
-		return Attr_Data(str), len(str)+1, true
-	case Dw_Form.strp:
-		str_off := slice_to_type(data, u32) or_return
-		str := cstring(raw_data(str_buffer[str_off:]))
-
-		return Attr_Data(str), size_of(str_off), true
-	case Dw_Form.line_strp:
-		str_off := slice_to_type(data, u32) or_return
-		str := cstring(raw_data(line_str_buffer[str_off:]))
-
-		return Attr_Data(str), size_of(str_off), true
-	case Dw_Form.strx1:
-		str_off_idx := slice_to_type(data, u8) or_return
-		str_off_off := str_off_idx * size_of(u32)
-		str_off := slice_to_type(str_offsets_buffer[str_off_off:], u32) or_return
-		str := cstring(raw_data(str_buffer[str_off:]))
-
-		return Attr_Data(str), size_of(str_off_off), true
-	case Dw_Form.strx2:
-		str_off_idx := slice_to_type(data, u16) or_return
-		str_off_off := str_off_idx * size_of(u32)
-		str_off := slice_to_type(str_offsets_buffer[str_off_off:], u32) or_return
-		str := cstring(raw_data(str_buffer[str_off:]))
-
-		return Attr_Data(str), size_of(str_off_off), true
-	case Dw_Form.loclistx:
-		val, leb_size := read_uleb(data) or_return
-
-		return Attr_Data(val), leb_size, true
-	case Dw_Form.rnglistx:
-		val, leb_size := read_uleb(data) or_return
-
-		return Attr_Data(val), leb_size, true
-	case Dw_Form.addrx:
-		val, leb_size := read_uleb(data) or_return
-
-		return Attr_Data(val), leb_size, true
-	case Dw_Form.sec_offset:
-		val := slice_to_type(data, u32) or_return
-
-		return Attr_Data(val), size_of(val), true
-	case Dw_Form.flag_present:
-		return Attr_Data(bool(true)), 0, true
-	case Dw_Form.addr:
-		addr := slice_to_type(data, u64) or_return
-
-		return Attr_Data(addr), size_of(addr), true
-	case Dw_Form.ref_addr:
-		addr := slice_to_type(data, u32) or_return
-		return Attr_Data(addr), size_of(addr), true
-	case Dw_Form.block1:
-		length := slice_to_type(data, u8) or_return
-		block := data[size_of(length):int(length)]
-
-		return Attr_Data(block), size_of(length) + int(length), true
-	case Dw_Form.block2:
-		length := slice_to_type(data, u16) or_return
-		block := data[size_of(length):int(length)]
-
-		return Attr_Data(block), size_of(length) + int(length), true
-	case Dw_Form.block4:
-		length := slice_to_type(data, u32) or_return
-		block := data[size_of(length):int(length)]
-
-		return Attr_Data(block), size_of(length) + int(length), true
-	case Dw_Form.data1:
-		val := slice_to_type(data, u8) or_return
-
-		return Attr_Data(val), size_of(val), true
-	case Dw_Form.data2:
-		val := slice_to_type(data, u16) or_return
-
-		return Attr_Data(val), size_of(val), true
-	case Dw_Form.data4:
-		val := slice_to_type(data, u32) or_return
-
-		return Attr_Data(val), size_of(val), true
-	case Dw_Form.data8:
-		val := slice_to_type(data, u64) or_return
-
-		return Attr_Data(val), size_of(val), true
-	case Dw_Form.udata:
-		val, leb_size := read_uleb(data) or_return
-
-		return Attr_Data(val), leb_size, true
-	case Dw_Form.sdata:
-		val, leb_size := read_ileb(data) or_return
-
-		return Attr_Data(val), leb_size, true
-	case Dw_Form.ref4:
-		val := slice_to_type(data, u32) or_return
-
-		return Attr_Data(val), size_of(val), true
-	case Dw_Form.ref_udata:
-		val, leb_size := read_uleb(data) or_return
-
-		return Attr_Data(val), leb_size, true
-	case Dw_Form.exprloc:
-		expr_length, leb_size := read_uleb(data) or_return
-		expr := data[leb_size:leb_size+int(expr_length)]
-
-		return Attr_Data(expr), int(expr_length) + leb_size, true
-	case Dw_Form.implicit_const:
-		constval, leb_size := read_ileb(abbrev_buffer) or_return
-		return Attr_Data(constval), leb_size, true
-	case: panic("TODO Can't handle (%x) %s yet!\n", u64(form), form)
-	}
-
-	return
-}
-
 cleanup_au_offsets :: proc(au_off_map: ^map[int][dynamic]Abbrev_Unit) {
 	for k, v in au_off_map {
+		for au in v {
+			delete(au.attrs)
+		}
 		delete(v)
 	}
 	delete(au_off_map^)
@@ -1114,13 +1182,13 @@ cleanup_cu_files_list :: proc(cu_files_list: ^[dynamic]CU_Files_Unit) {
 	}
 }
 
-process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[dynamic]CU_Files_Unit, cu_file_map: ^map[CU_File_Entry]string) -> bool {
+process_line_info :: proc(trace: ^Trace, ctx: ^DWARF_Context, cu_files_list: ^[dynamic]CU_Files_Unit, cu_file_map: ^map[CU_File_Entry]string) -> bool {
 	version : u16 = 0
 	fmt.printf("DWARF: parsing debug_line\n")
-	for i := 0; i < len(sections.line); {
+	for i := 0; i < len(ctx.sections.line); {
 		cu_start := i
 
-		unit_length, ok := slice_to_type(sections.line[i:], u32)
+		unit_length, ok := slice_to_type(ctx.sections.line[i:], u32)
 		if !ok {
 			panic("%s\n", #location())
 		}
@@ -1132,7 +1200,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 
 		if unit_length == 0 { continue }
 
-		version, ok = slice_to_type(sections.line[i:], u16)
+		version, ok = slice_to_type(ctx.sections.line[i:], u16)
 		if !ok {
 			panic("%s\n", #location())
 		}
@@ -1142,12 +1210,10 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 		}
 		i += size_of(version)
 
-		ctx := DWARF_Context{}
 		ctx.bits_64 = false
 		ctx.version = int(version)
-		ctx.sections = sections
 
-		line_hdr, size, ok3 := parse_line_header(&ctx, sections.line[i:])
+		line_hdr, size, ok3 := parse_line_header(ctx, ctx.sections.line[i:])
 		if !ok3 {
 			panic("%s\n", #location())
 		}
@@ -1172,7 +1238,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 		i += int(opcode_table_len)
 
 		if version == 5 {
-			dir_entry_fmt_count, ok := slice_to_type(sections.line[i:], u8)
+			dir_entry_fmt_count, ok := slice_to_type(ctx.sections.line[i:], u8)
 			if !ok {
 				panic("%s\n", #location())
 			}
@@ -1181,7 +1247,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 			fmt_parse := [255]LineFmtEntry{}
 			fmt_parse_len := 0
 			for j := 0; j < int(dir_entry_fmt_count); j += 1 {
-				content_type, size1, ok := read_uleb(sections.line[i:])
+				content_type, size1, ok := read_uleb(ctx.sections.line[i:])
 				if !ok {
 					panic("%s\n", #location())
 				}
@@ -1189,7 +1255,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 
 				content_code := Dw_LNCT(content_type)
 
-				form_type, size2, ok2 := read_uleb(sections.line[i:])
+				form_type, size2, ok2 := read_uleb(ctx.sections.line[i:])
 				if !ok2 {
 					panic("%s\n", #location())
 				}
@@ -1201,7 +1267,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 				fmt_parse_len += 1
 			}
 
-			dir_name_count, size2, ok2 := read_uleb(sections.line[i:])
+			dir_name_count, size2, ok2 := read_uleb(ctx.sections.line[i:])
 			if !ok2 {
 				panic("%s\n", #location())
 			}
@@ -1218,12 +1284,12 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 								return false
 							}
 
-							str_idx, ok := slice_to_type(sections.line[i:], u32)
+							str_idx, ok := slice_to_type(ctx.sections.line[i:], u32)
 							if !ok {
 								panic("%s\n", #location())
 							}
 
-							cstr_dir_name := cstring(raw_data(sections.line_str[str_idx:]))
+							cstr_dir_name := cstring(raw_data(ctx.sections.line_str[str_idx:]))
 							non_zero_append(&cu.dir_table, string(cstr_dir_name))
 
 							i += size_of(u32)
@@ -1235,7 +1301,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 				}
 			}
 
-			file_entry_fmt_count, ok3 := slice_to_type(sections.line[i:], u8)
+			file_entry_fmt_count, ok3 := slice_to_type(ctx.sections.line[i:], u8)
 			if !ok3 {
 				panic("%s\n", #location())
 			}
@@ -1244,7 +1310,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 			fmt_parse = {}
 			fmt_parse_len = 0
 			for j := 0; j < int(file_entry_fmt_count); j += 1 {
-				content_type, size, ok := read_uleb(sections.line[i:])
+				content_type, size, ok := read_uleb(ctx.sections.line[i:])
 				if !ok {
 					panic("%s\n", #location())
 				}
@@ -1252,7 +1318,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 
 				content_code := Dw_LNCT(content_type)
 
-				form_type, size2, ok2 := read_uleb(sections.line[i:])
+				form_type, size2, ok2 := read_uleb(ctx.sections.line[i:])
 				if !ok2 {
 					panic("%s\n", #location())
 				}
@@ -1264,7 +1330,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 				fmt_parse_len += 1
 			}
 
-			file_name_count, size3, ok4 := read_uleb(sections.line[i:])
+			file_name_count, size3, ok4 := read_uleb(ctx.sections.line[i:])
 			if !ok4 {
 				panic("%s\n", #location())
 			}
@@ -1281,33 +1347,33 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 								return false
 							}
 
-							str_idx, ok := slice_to_type(sections.line[i:], u32)
+							str_idx, ok := slice_to_type(ctx.sections.line[i:], u32)
 							if !ok {
 								panic("%s\n", #location())
 							}
 
-							cstr_file_name := cstring(raw_data(sections.line_str[str_idx:]))
+							cstr_file_name := cstring(raw_data(ctx.sections.line_str[str_idx:]))
 							file.name = string(cstr_file_name)
 
 							i += size_of(u32)
 						} case .directory_index: {
 							#partial switch def_block.form {
 								case .data1: {
-									dir_idx, ok := slice_to_type(sections.line[i:], u8)
+									dir_idx, ok := slice_to_type(ctx.sections.line[i:], u8)
 									if !ok {
 										panic("%s\n", #location())
 									}
 									file.dir_idx = int(dir_idx)
 									i += size_of(u8)
 								} case .data2: {
-									dir_idx, ok := slice_to_type(sections.line[i:], u16)
+									dir_idx, ok := slice_to_type(ctx.sections.line[i:], u16)
 									if !ok {
 										panic("%s\n", #location())
 									}
 									file.dir_idx = int(dir_idx)
 									i += size_of(u16)
 								} case .udata: {
-									dir_idx, size, ok := read_uleb(sections.line[i:])
+									dir_idx, size, ok := read_uleb(ctx.sections.line[i:])
 									if !ok {
 										panic("%s\n", #location())
 									}
@@ -1319,7 +1385,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 								}
 							}
 						} case .md5: {
-							md5, ok := slice_to_type(sections.line[i:], [16]u8)
+							md5, ok := slice_to_type(ctx.sections.line[i:], [16]u8)
 							if !ok {
 								panic("%s\n", #location())
 							}
@@ -1340,7 +1406,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 			rem_size := int(full_cu_size) - hdr_size
 
 			cu.line_table = Line_Table{
-				op_buffer   = sections.line[i:i+rem_size],
+				op_buffer   = ctx.sections.line[i:i+rem_size],
 				opcode_base = line_hdr.opcode_base,
 				line_base   = line_hdr.line_base,
 				line_range  = line_hdr.line_range,
@@ -1353,7 +1419,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 			non_zero_append(&cu.file_table, File_Unit{})
 
 			for {
-				cstr_dir_name := cstring(raw_data(sections.line[i:]))
+				cstr_dir_name := cstring(raw_data(ctx.sections.line[i:]))
 
 				i += len(cstr_dir_name) + 1
 				if len(cstr_dir_name) == 0 {
@@ -1364,26 +1430,26 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 			}
 
 			for {
-				cstr_file_name := cstring(raw_data(sections.line[i:]))
+				cstr_file_name := cstring(raw_data(ctx.sections.line[i:]))
 
 				i += len(cstr_file_name) + 1
 				if len(cstr_file_name) == 0 {
 					break
 				}
 
-				dir_idx, size, ok := read_uleb(sections.line[i:])
+				dir_idx, size, ok := read_uleb(ctx.sections.line[i:])
 				if !ok {
 					panic("%s\n", #location())
 				}
 				i += size
 
-				last_modified, size2, ok2 := read_uleb(sections.line[i:])
+				last_modified, size2, ok2 := read_uleb(ctx.sections.line[i:])
 				if !ok2 {
 					panic("%s\n", #location())
 				}
 				i += size2
 
-				file_size, size3, ok3 := read_uleb(sections.line[i:])
+				file_size, size3, ok3 := read_uleb(ctx.sections.line[i:])
 				if !ok3 {
 					panic("%s\n", #location())
 				}
@@ -1397,7 +1463,7 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 			rem_size := int(full_cu_size) - hdr_size
 
 			cu.line_table = Line_Table{
-				op_buffer   = sections.line[i:i+rem_size],
+				op_buffer   = ctx.sections.line[i:i+rem_size],
 				opcode_base = line_hdr.opcode_base,
 				line_base   = line_hdr.line_base,
 				line_range  = line_hdr.line_range,
@@ -1482,45 +1548,40 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 						lm_state.prologue_end   = false
 						lm_state.epilogue_begin = false
 					} case .advance_pc: {
-						addr_inc, size, ok := read_uleb(line_table.op_buffer[i:])
+						addr_inc, size, ok := read_uleb(line_table.op_buffer[i:]); i += size
 						if !ok {
 							panic("%s\n", #location())
 						}
-						lm_state.address = lm_state.address + u64(addr_inc)
-						i += size
+						lm_state.address += u64(addr_inc) //* line_hdr.min_inst_length
 					} case .advance_line: {
-						line_inc, size, ok := read_ileb(line_table.op_buffer[i:])
+						line_inc, size, ok := read_ileb(line_table.op_buffer[i:]); i += size
 						if !ok {
 							panic("%s\n", #location())
 						}
 						lm_state.line_num = u64(int(lm_state.line_num) + int(line_inc))
-						i += size
 					} case .set_file: {
-						file_idx, size, ok := read_uleb(line_table.op_buffer[i:])
+						file_idx, size, ok := read_uleb(line_table.op_buffer[i:]); i += size
 						if !ok {
 							panic("%s\n", #location())
 						}
 						lm_state.file_idx = file_idx
-						i += size
 					} case .set_column: {
-						col_num, size, ok := read_uleb(line_table.op_buffer[i:])
+						col_num, size, ok := read_uleb(line_table.op_buffer[i:]); i += size
 						if !ok {
 							panic("%s\n", #location())
 						}
 						lm_state.col_num = col_num
-						i += size
 					} case .negate_stmt: {
 						lm_state.is_stmt = !lm_state.is_stmt
 					} case .set_basic_block: {
 						lm_state.basic_block = true
 					} case .const_add_pc: {
 						addr_inc := (255 - line_table.opcode_base) / line_table.line_range
-						lm_state.address += u64(addr_inc)
+						lm_state.address += u64(addr_inc) //* line_hdr.min_inst_length
 					} case .fixed_advance_pc: {
-						advance := slice_to_type(line_table.op_buffer[i:], u16)
+						advance := slice_to_type(line_table.op_buffer[i:], u16); i += size_of(advance)
 						lm_state.address += u64(advance)
 						lm_state.op_idx = 0
-						i += size_of(advance)
 					} case .set_epilogue_begin: {
 						lm_state.epilogue_begin = true
 					} case .set_prologue_end: {
@@ -1566,99 +1627,34 @@ process_line_info :: proc(trace: ^Trace, sections: ^Sections, cu_files_list: ^[d
 }
 
 load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
-	cu_files_list := make([dynamic]CU_Files_Unit)
-	defer cleanup_cu_files_list(&cu_files_list)
+	ctx := DWARF_Context{}
+	ctx.sections = sections
 
+	cu_files_list := make([dynamic]CU_Files_Unit)
 	cu_file_map := make(map[CU_File_Entry]string)
+	defer cleanup_cu_files_list(&cu_files_list)
 	defer delete(cu_file_map)
 
-	process_line_info(trace, sections, &cu_files_list, &cu_file_map) or_return
-
-	// chunk through all abbreviations
-	cu_start := 0
+	process_line_info(trace, &ctx, &cu_files_list, &cu_file_map) or_return
 
 	au_offset_map := make(map[int][dynamic]Abbrev_Unit)
 	defer cleanup_au_offsets(&au_offset_map)
 
-	au_offset_map[0] = make([dynamic]Abbrev_Unit)
-	abbrevs := &au_offset_map[cu_start]
-
-	fmt.printf("DWARF: parsing debug_abbrev\n")
-	for i := 0; i < len(sections.abbrev); {
-		abbrev_code, size, ok := read_uleb(sections.abbrev[i:])
-		if !ok {
-			panic("%s\n", #location())
-		}
-		i += size
-
-		// got a NULL abbrev
-		if abbrev_code == 0 {
-			cu_start = i
-
-			au_offset_map[cu_start] = make([dynamic]Abbrev_Unit)
-			abbrevs = &au_offset_map[cu_start]
-			continue
-		}
-
-		entry := Abbrev_Unit{}
-		entry.id = abbrev_code
-
-		entry_type, size2, ok2 := read_uleb(sections.abbrev[i:])
-		if !ok2 {
-			panic("%s\n", #location())
-		}
-		i += size2
-
-		entry.type = Dw_Tag(entry_type)
-		entry.has_children = sections.abbrev[i] > 0
-		i += 1
-
-		// get the size of attributes list for an abbrev
-		attrs_start := i
-		for i < len(sections.abbrev) {
-			attr_name, size, ok := read_uleb(sections.abbrev[i:])
-			if !ok {
-				panic("%s\n", #location())
-			}
-			i += size
-
-			attr_form, size2, ok2 := read_uleb(sections.abbrev[i:])
-			if !ok2 {
-				panic("%s\n", #location())
-			}
-			i += size2
-
-			// 0, 0 means we've hit the end of the list of attributes
-			if attr_name == 0 && attr_form == 0 {
-				break
-			}
-
-			// implicit const is stored in the attribute. Oh boy.
-			if Dw_Form(attr_form) == .implicit_const {
-				_, size, ok := read_ileb(sections.abbrev[i:])
-				if !ok {
-					panic("%s\n", #location())
-				}
-				i += size
-			}
-		}
-
-		entry.attrs_buf = sections.abbrev[attrs_start:i]
-		non_zero_append(abbrevs, entry)
-	}
+	init_abbrevs(&ctx, &au_offset_map)
 
 	MAX_BLOCK_STACK :: 30
-	cu_start_offset  := 0
-
-	func_offset_map := make(map[int]Function_Unit)
-	defer delete(func_offset_map)
-
 	symbol_found := false
 	skew_size : u64 = 0
 
+	attr_scratch := make([dynamic]Attr_Result)
+	attr_scratch2 := make([dynamic]Attr_Result)
+
 	// Resolve all the symbols we can
 	fmt.printf("DWARF: Resolving symbols\n")
-	for i := 0; i < len(sections.info); {
+	cur_cu_offset := 0
+	for cur_cu_offset < len(sections.info) {
+		i := cur_cu_offset
+
 		unit_length, ok := slice_to_type(sections.info[i:], u32)
 		if !ok {
 			panic("%s\n", #location())
@@ -1668,21 +1664,21 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 			return false 
 		}
 		i += size_of(unit_length)
+		next_offset := 4 + unit_length
+
+		ctx.bits_64 = false
 
 		version, ok2 := slice_to_type(sections.info[i:], u16)
 		if !ok2 {
 			panic("%s\n", #location())
 		}
-		if !(version == 3 || version == 4 || version == 5) {
+		if (version < 3 || version > 5) {
 			fmt.printf("Only supports DWARF 3, 4 and 5, got %d\n", version)
 			return false
 		}
 		i += size_of(version)
 
-		ctx := DWARF_Context{}
-		ctx.bits_64 = false
 		ctx.version = int(version)
-		ctx.sections = sections
 
 		cu_hdr, size, ok3 := parse_cu_header(&ctx, sections.info[i:])
 		if !ok3 {
@@ -1690,81 +1686,158 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 		}
 		i += size
 
-		if cu_hdr.address_size != 8 {
-			fmt.printf("Doesn't support address size other than 8! %v\n", cu_hdr.address_size)
+		ctx.addr_size = cu_hdr.addr_size
+		if ctx.addr_size != 8 {
+			fmt.printf("Doesn't support address size other than 8! %v\n", ctx.addr_size)
 			return false
 		}
-
-		child_level := 1
-		first_entry := true
 
 		cu := CU_Unit{}
 		cu.abbrevs = au_offset_map[int(cu_hdr.abbrev_offset)][:]
 
-		for first_entry || child_level > 1 {
-			first_entry = false
-
-			fu := Function_Unit{}
+		next_cu_offset := cur_cu_offset + int(next_offset)
+		for i < next_cu_offset {
 			block_offset := i
-			size, child_adj, is_function := parse_abbrev_attrs(&ctx, &cu, &fu, i)
-			i += size
-			child_level += child_adj
 
-			if child_adj == -1 {
+			clear(&attr_scratch)
+			clear(&attr_scratch2)
+			au_idx, size, status := parse_die(&ctx, sections.info[i:], cu.abbrevs, &attr_scratch)
+			if status == .Fail {
+				fmt.printf("Failed to parse DIE\n")
+				return false
+			}
+			i += size
+
+			if status == .Skip {
 				continue
 			}
 
-			// Finished a function? Time to resolve its name and location
-			if is_function {
-				func := Function_Unit{}
-				func.name = fu.name
-				func.specification = fu.specification
+			au := cu.abbrevs[au_idx]
 
-				if func.name == "" && fu.origin != 0 {
-					parent_func := Function_Unit{}
-					parse_abbrev_attrs(&ctx, &cu, &parent_func, int(fu.origin))
-					func.name = parent_func.name
+			/*
+			fmt.printf("0x%08x\n", block_offset)
+			for attr, idx in attr_scratch {
+				fmt.printf("\t%s - %s(%v)\n", attr.id, au.attrs[idx].form_id, attr.val)
+			}
+			*/
 
-					if parent_func.specification != 0 {
-						func.specification = parent_func.specification
+			#partial switch au.type {
+			case .compile_unit:
+				v := get_attr(attr_scratch[:], .str_offsets_base)
+				if v == nil { cu.str_offsets_base = 0 }
+				else {
+					cu.str_offsets_base = attr_get_u64(v) or_return
+				}
+
+				v = get_attr(attr_scratch[:], .addr_base)
+				if v == nil { cu.addr_base = 0 }
+				else {
+					cu.addr_base = attr_get_u64(v) or_return
+				}
+
+				v = get_attr(attr_scratch[:], .rnglists_base)
+				if v == nil { cu.rnglists_base = 0 }
+				else {
+					cu.rnglists_base = attr_get_u64(v) or_return
+				}
+
+				v = get_attr(attr_scratch[:], .loclists_base)
+				if v == nil { cu.loclists_base = 0 }
+				else {
+					cu.loclists_base = attr_get_u64(v) or_return
+				}
+
+				v = get_attr(attr_scratch[:], .frame_base)
+
+			// If we're a function?
+			case .subprogram: fallthrough
+			case .inlined_subroutine: fallthrough
+			case .entry_point:
+				func_name := ""
+				attrs := attr_scratch[:]
+
+				func_loop: for j := 0; j < 3; j += 1 {
+					// Try grabbing name first
+					name := get_attr_str(&ctx, &cu, attrs, .name)
+					if name != "" {
+						func_name = name
+						//fmt.printf("Got name: %v\n", func_name)
+						break func_loop
+					}
+
+					// Then check for abstract origin links
+					new_offset, ok := get_attr_ref(&ctx, attrs, .abstract_origin, cur_cu_offset)
+					if ok {
+						clear(&attr_scratch2)
+						_, _, status = parse_die(&ctx, sections.info[new_offset:], cu.abbrevs, &attr_scratch2)
+						if status == .Fail {
+							fmt.printf("Invalid DIE offset: %x\n", new_offset)
+							return false
+						}
+						attrs = attr_scratch2[:]
+						if status == .Pass {
+							//fmt.printf("resolving abstract origin:\n\tnew_abbrev: %#v\n", attrs)
+							continue
+						}
+					}
+
+					// Then check for specification links
+					new_offset, ok = get_attr_ref(&ctx, attrs, .specification, cur_cu_offset)
+					if ok {
+						clear(&attr_scratch2)
+						_, _, status = parse_die(&ctx, sections.info[new_offset:], cu.abbrevs, &attr_scratch2)
+						if status == .Fail {
+							fmt.printf("Invalid DIE offset: %x\n", new_offset)
+							return false
+						}
+						attrs = attr_scratch2[:]
+						if status == .Pass {
+							//fmt.printf("resolving specification:\n\tnew_abbrev: %#v\n", attrs)
+							continue
+						}
 					}
 				}
-				if func.name == "" && func.specification != 0 {
-					parent_func := Function_Unit{}
-					parse_abbrev_attrs(&ctx, &cu, &parent_func, int(func.specification))
-					func.name = parent_func.name
-				}
-				func.low_pc = fu.low_pc
-
-				if fu.ranges_off != 0 && func.name != "" {
-					func.low_pc = parse_range_table(&ctx, &cu, fu.ranges_off)
+				if func_name == "" {
+					break
 				}
 
-				if func.name != "" && func.low_pc != 0 {
-					symbol_addr := func.low_pc
-					symbol_name := strings.clone_from_cstring(func.name, context.temp_allocator)
-					interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
-					am_insert(&trace.addr_map, symbol_addr, interned_symbol)
+				// determine function range
+				low_pc, ok := get_attr_addr(&ctx, &cu, attr_scratch[:], .low_pc)
+				if ok {
+					val := get_attr(attr_scratch[:], .high_pc)
+					high_pc : u64 = 0
 
-					if !symbol_found && symbol_name == "spall_auto_init" {
-						skew_size = trace.skew_address - symbol_addr
-						symbol_found = true
+					#partial switch v in val {
+					case dw_addr:
+						high_pc = u64(v)
+					case dw_udata:
+						high_pc = low_pc + u64(v)
+					case:
+						fmt.printf("Invalid function range!\n")
+						return false
+					}
+				} else {
+					ranges_val := get_attr(attr_scratch[:], .ranges)
+					if ranges_val != nil {
+						low_pc, ok = parse_range_table(&ctx, &cu, ranges_val)
+						if !ok {
+							break
+						}
 					}
 				}
 
-/*
-				if func.name == "" {
-					fmt.printf("--- start of unprocessed function\n")
-					print_abbrev_attrs(&ctx, &cu, block_offset)
-					if fu.origin != 0 {
-						print_abbrev_attrs(&ctx, &cu, int(fu.origin))
-					}
-					fmt.printf("--- end of unprocessed function\n")
+				symbol_addr := low_pc
+				interned_symbol := in_get(&trace.intern, &trace.string_block, func_name)
+				am_insert(&trace.addr_map, symbol_addr, interned_symbol)
+
+				if !symbol_found && func_name == "spall_auto_init" {
+					skew_size = trace.skew_address - symbol_addr
+					symbol_found = true
 				}
-*/
 			}
 		}
-		cu_start_offset = i
+
+		cur_cu_offset = next_cu_offset
 	}
 	if !symbol_found {
 		fmt.printf("Could not find \"spall_auto_init\" to address skew?\n")
