@@ -128,7 +128,8 @@ extern "C" {
 #endif
 
 #define SPALL_NOINSTRUMENT __attribute__((no_instrument_function))
-#define SPALL_FORCEINLINE __attribute__((always_inline)) inline
+#define SPALL_FORCE_INLINE __attribute__((always_inline)) inline
+#define SPALL_FORCE_NOINLINE __attribute__((noinline))
 #define __debugbreak() __builtin_trap()
 
 #if SPALL_IS_CPP
@@ -198,7 +199,7 @@ typedef struct SpallBufferHeader {
 
 #pragma pack(pop)
 
-SPALL_FN SPALL_FORCEINLINE uint64_t spall_delta_to_bits(uint64_t dt) {
+SPALL_FN SPALL_FORCE_INLINE uint64_t spall_delta_to_bits(uint64_t dt) {
 	uint32_t count = 0;
 	count += (dt >= 0x100);
 	count += (dt >= 0x10000);
@@ -320,7 +321,7 @@ SPALL_FN double spall_get_clock_multiplier(void) {
 #endif
 
 
-SPALL_FN SPALL_FORCEINLINE void spall_signal(Spall_Futex *addr) {
+SPALL_FN SPALL_FORCE_INLINE void spall_signal(Spall_Futex *addr) {
     long ret = syscall(SYS_futex, addr, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, NULL, NULL, 0);
     if (ret == -1) {
         perror("Futex wake");
@@ -328,7 +329,7 @@ SPALL_FN SPALL_FORCEINLINE void spall_signal(Spall_Futex *addr) {
     }
 }
 
-SPALL_FN SPALL_FORCEINLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
+SPALL_FN SPALL_FORCE_INLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
     for (;;) {
         long ret = syscall(SYS_futex, addr, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, val, NULL, NULL, 0);
         if (ret == -1) {
@@ -395,7 +396,7 @@ SPALL_FN bool get_program_path(char **out_path) {
 int __ulock_wait(uint32_t operation, void *addr, uint64_t value, uint32_t timeout);
 int __ulock_wake(uint32_t operation, void *addr, uint64_t wake_value);
 
-SPALL_FN SPALL_FORCEINLINE void spall_signal(Spall_Futex *addr) {
+SPALL_FN SPALL_FORCE_INLINE void spall_signal(Spall_Futex *addr) {
     for (;;) {
         int ret = __ulock_wake(UL_COMPARE_AND_WAIT | ULF_NO_ERRNO, addr, 0);
         if (ret >= 0) {
@@ -413,7 +414,7 @@ SPALL_FN SPALL_FORCEINLINE void spall_signal(Spall_Futex *addr) {
     }
 }
 
-SPALL_FN SPALL_FORCEINLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
+SPALL_FN SPALL_FORCE_INLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
     for (;;) {
         int ret = __ulock_wait(UL_COMPARE_AND_WAIT | ULF_NO_ERRNO, addr, val, 0);
         if (ret >= 0) {
@@ -445,7 +446,7 @@ SPALL_FN bool get_program_path(char **out_path) {
     return true;
 }
 
-SPALL_FN SPALL_FORCEINLINE double spall_get_clock_multiplier(void) {
+SPALL_FN SPALL_FORCE_INLINE double spall_get_clock_multiplier(void) {
 
     // Cache the answer so that multiple calls never take the slow path more than once
     static double multiplier = 0;
@@ -473,11 +474,11 @@ SPALL_FN SPALL_FORCEINLINE double spall_get_clock_multiplier(void) {
     return multiplier;
 }
 
-SPALL_FN SPALL_FORCEINLINE void spall_signal(Spall_Futex *addr) {
+SPALL_FN SPALL_FORCE_INLINE void spall_signal(Spall_Futex *addr) {
     WakeByAddressSingle((void *)addr);
 }
 
-SPALL_FN SPALL_FORCEINLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
+SPALL_FN SPALL_FORCE_INLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
     WaitOnAddress(addr, (void *)&val, sizeof(val), INFINITE);
 }
 
@@ -517,7 +518,7 @@ SPALL_FN void *spall_writer(void *arg) {
 #endif
 }
 
-SPALL_FN SPALL_FORCEINLINE bool spall__file_write(void *p, size_t n) {
+SPALL_FN SPALL_FORCE_INLINE bool spall__file_write(void *p, size_t n) {
     atomic_store(&spall_buffer->writer.size, n);
     atomic_store(&spall_buffer->writer.ptr, (uint64_t)p);
     spall_signal(&spall_buffer->writer.ptr);
@@ -531,7 +532,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall__file_write(void *p, size_t n) {
     return true;
 }
 
-SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_flush(void) {
+SPALL_NOINSTRUMENT SPALL_FORCE_INLINE bool spall_auto_buffer_flush(void) {
     if (!spall_buffer) return false;
 
     size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
@@ -560,7 +561,7 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_flush(void) {
     return true;
 }
 
-SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t caller) {
+SPALL_FN SPALL_FORCE_INLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t caller) {
     spall_buffer->current_depth += 1;
     spall_buffer->max_depth = SPALL_MAX(spall_buffer->max_depth, spall_buffer->current_depth);
 
@@ -609,7 +610,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t
     return true;
 }
 
-SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
+SPALL_FN SPALL_FORCE_INLINE bool spall_buffer_micro_end(void) {
     uint64_t now = spall_get_clock();
     spall_buffer->current_depth -= 1;
 
@@ -643,7 +644,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
     return true;
 }
 
-SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_begin(const char *name, signed long name_len, const char *args, signed long args_len) {
+SPALL_NOINSTRUMENT SPALL_FORCE_INLINE bool spall_auto_buffer_begin(const char *name, signed long name_len, const char *args, signed long args_len) {
 
     spall_buffer->current_depth += 1;
     spall_buffer->max_depth = SPALL_MAX(spall_buffer->max_depth, spall_buffer->current_depth);
@@ -690,11 +691,11 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_begin(const char *na
     return true;
 }
 
-SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_end(void) {
+SPALL_NOINSTRUMENT SPALL_FORCE_INLINE bool spall_auto_buffer_end(void) {
     return spall_buffer_micro_end();
 }
 
-SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_thread_init(uint32_t thread_id, size_t buffer_size) {
+SPALL_NOINSTRUMENT SPALL_FORCE_INLINE bool spall_auto_thread_init(uint32_t thread_id, size_t buffer_size) {
     if (buffer_size < 512) { return false; }
     if (spall_buffer != NULL) { return false; }
 
@@ -715,7 +716,7 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_thread_init(uint32_t thread
     return true;
 }
 
-SPALL_NOINSTRUMENT SPALL_FORCEINLINE void spall_auto_thread_quit(void) {
+SPALL_NOINSTRUMENT SPALL_FORCE_INLINE void spall_auto_thread_quit(void) {
     spall_thread_running = false;
     spall_auto_buffer_flush();
 
@@ -748,7 +749,7 @@ SPALL_FN void *spall_canonical_addr(void* fn) {
 }
 
 
-SPALL_NOINSTRUMENT bool spall_auto_init(char *filename) {
+SPALL_NOINSTRUMENT SPALL_FORCE_NOINLINE bool spall_auto_init(char *filename) {
     if (!filename) return false;
     memset(&spall_ctx, 0, sizeof(spall_ctx));
 
