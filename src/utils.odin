@@ -605,44 +605,42 @@ Stream_Context :: struct {
 stream_init :: proc(buffer: []u8, #any_int idx: int = 0) -> Stream_Context {
 	return Stream_Context{buffer = buffer, idx = idx}
 }
-stream_set :: proc(ctx: ^Stream_Context, idx: int, loc := #caller_location) {
+stream_set :: proc(ctx: ^Stream_Context, idx: int) {
 	ctx.idx = idx
 }
-stream_skip :: proc(ctx: ^Stream_Context, skip: int, loc := #caller_location) {
+stream_skip :: proc(ctx: ^Stream_Context, skip: int) {
 	ctx.idx += skip
 }
-stream_uleb :: proc(ctx: ^Stream_Context, loc := #caller_location) -> (u64, bool) {
-	val, size, ok := #force_inline read_uleb(ctx.buffer[ctx.idx:])
-	//if !ok { panic("%s\n", loc) }
-	if !ok { return 0, false }
+stream_uleb :: proc(ctx: ^Stream_Context) -> (ret: u64, ok: bool) {
+	val, size := read_uleb(ctx.buffer[ctx.idx:]) or_return
 
 	ctx.idx += size
 	return val, true
 }
-stream_ileb :: proc(ctx: ^Stream_Context, loc := #caller_location) -> (i64, bool) {
-	val, size, ok := #force_inline read_ileb(ctx.buffer[ctx.idx:])
-	//if !ok { panic("%s\n", loc) }
-	if !ok { return 0, false }
+stream_ileb :: proc(ctx: ^Stream_Context) -> (ret: i64, ok: bool) {
+	val, size := read_ileb(ctx.buffer[ctx.idx:]) or_return
 
 	ctx.idx += size
 	return val, true
 }
-stream_val :: proc(ctx: ^Stream_Context, $T: typeid, loc := #caller_location) -> (T, bool) {
-	val, ok := #force_inline slice_to_type(ctx.buffer[ctx.idx:], T)
-	//if !ok { panic("%s\n", loc) }
-	if !ok { return val, false }
+stream_val :: proc(ctx: ^Stream_Context, $T: typeid) -> (v: T, ok: bool) {
+	buffer := ctx.buffer[ctx.idx:]
+
+	if len(buffer) < size_of(T) { return }
+	val := intrinsics.unaligned_load((^T)(raw_data(buffer)))
 
 	ctx.idx += size_of(T)
 	return val, true
 }
-stream_bytes :: proc(ctx: ^Stream_Context, #any_int sz: int, loc := #caller_location) -> ([]u8, bool) {
-	if len(ctx.buffer[ctx.idx:]) < sz { return nil, false }
+stream_bytes :: proc(ctx: ^Stream_Context, #any_int sz: int) -> (ret: []u8, ok: bool) {
+	buffer := ctx.buffer[ctx.idx:]
+	if len(buffer) < sz { return }
 
-	buf := ctx.buffer[ctx.idx:ctx.idx+sz]
+	buf := buffer[:sz]
 	ctx.idx += sz
 	return buf, true
 }
-stream_cstring :: proc(ctx: ^Stream_Context, loc := #caller_location) -> (cstring, bool) {
+stream_cstring :: proc(ctx: ^Stream_Context) -> (cstring, bool) {
 	str := cstring(raw_data(ctx.buffer[ctx.idx:]))
 	ctx.idx += len(str)+1
 	return str, true

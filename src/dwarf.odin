@@ -432,7 +432,7 @@ CU_Files_Unit :: struct {
 
 DWARF_Context :: struct {
 	sections: ^Sections,
-	bits_64: bool,
+	bits_32: bool,
 	version: int,
 	addr_size: int,
 }
@@ -668,11 +668,11 @@ get_attr_str :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id
 
 		if cu.str_offsets_base == 0 { return "" }
 
-		if ctx.bits_64 {
-			off_off := cu.str_offsets_base + (8 * idx)
-			if (off_off + 8) > u64(len(str_offsets)) { return "" }
+		if ctx.bits_32 {
+			off_off := cu.str_offsets_base + (4 * idx)
+			if (off_off + 4) > u64(len(str_offsets)) { return "" }
 
-			off, ok := slice_to_type(str_offsets[off_off:], u64)
+			off, ok := slice_to_type(str_offsets[off_off:], u32)
 			if !ok { return "" }
 
 			str := cstring(raw_data(debug_str[off:]))
@@ -680,10 +680,10 @@ get_attr_str :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id
 
 			return strings.clone_from_cstring(str, context.temp_allocator)
 		} else {
-			off_off := cu.str_offsets_base + (4 * idx)
-			if (off_off + 4) > u64(len(str_offsets)) { return "" }
+			off_off := cu.str_offsets_base + (8 * idx)
+			if (off_off + 8) > u64(len(str_offsets)) { return "" }
 
-			off, ok := slice_to_type(str_offsets[off_off:], u32)
+			off, ok := slice_to_type(str_offsets[off_off:], u64)
 			if !ok { return "" }
 
 			str := cstring(raw_data(debug_str[off:]))
@@ -702,12 +702,12 @@ get_attr_str :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id
 }
 
 get_offset :: proc(ctx: ^DWARF_Context, rdr: ^Stream_Context) -> (v: u64, ok: bool) {
-	if ctx.bits_64 {
-		v := stream_val(rdr, u64) or_return
-		return v, true
-	} else {
+	if ctx.bits_32 {
 		v := stream_val(rdr, u32) or_return
 		return u64(v), true
+	} else {
+		v := stream_val(rdr, u64) or_return
+		return v, true
 	}
 }
 
@@ -771,6 +771,7 @@ parse_attr :: proc(ctx: ^DWARF_Context, rdr: ^Stream_Context, attr: Attr_Entry) 
 	case .data16:
 		block := stream_bytes(rdr, 16) or_return
 		return Attr_Data(dw_data16(block)), true
+
 	case .udata:
 		v := stream_uleb(rdr) or_return
 		return Attr_Data(dw_udata(v)), true
@@ -893,11 +894,14 @@ parse_die :: proc(ctx: ^DWARF_Context, rdr: ^Stream_Context, abbrevs: []Abbrev_U
 		return 0, .Fail
 	}
 
-	for attr in au.attrs {
+	non_zero_resize(out_attrs, len(au.attrs))
+	for attr, idx in au.attrs {
 		v, ok := parse_attr(ctx, rdr, attr)
 		if !ok { return 0, .Fail }
 
-		append(out_attrs, Attr_Result{attr.attr_id, v})
+		res := &out_attrs[idx]
+		res.id = attr.attr_id
+		res.val = v
 	}
 
 	return int(abbrev_idx), .Pass
@@ -912,16 +916,16 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> 
 	case dw_udata:      ranges_off = u64(v)
 
 	case dw_rnglistx:
-		if ctx.bits_64 {
-			offset_loc := cu.rnglists_base + (8 * u64(v))
-			if (offset_loc + 8) > u64(len(ctx.sections.rnglists)) { return }
-			offset := slice_to_type(ctx.sections.rnglists, u64) or_return
-			ranges_off = cu.rnglists_base + offset
-		} else {
+		if ctx.bits_32 {
 			offset_loc := cu.rnglists_base + (4 * u64(v))
 			if (offset_loc + 4) > u64(len(ctx.sections.rnglists)) { return }
 			offset := slice_to_type(ctx.sections.rnglists, u32) or_return
 			ranges_off = cu.rnglists_base + u64(offset)
+		} else {
+			offset_loc := cu.rnglists_base + (8 * u64(v))
+			if (offset_loc + 8) > u64(len(ctx.sections.rnglists)) { return }
+			offset := slice_to_type(ctx.sections.rnglists, u64) or_return
+			ranges_off = cu.rnglists_base + offset
 		}
 	case:
 		return
@@ -1149,7 +1153,7 @@ process_line_info :: proc(trace: ^Trace, ctx: ^DWARF_Context, cu_files_list: ^[d
 			return false
 		}
 
-		ctx.bits_64 = false
+		ctx.bits_32 = true
 		ctx.version = int(version)
 
 		line_hdr := parse_line_header(ctx, &rdr) or_return
@@ -1482,7 +1486,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, _skew_size: u64) -> bool 
 		}
 		next_offset := 4 + unit_length
 
-		ctx.bits_64 = false
+		ctx.bits_32 = true
 
 		version := stream_val(&rdr, u16) or_return
 		if (version < 3 || version > 5) {
