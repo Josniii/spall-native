@@ -11,6 +11,197 @@ import "core:fmt"
 // At the bottom of the PDB header is an array of offsets. The array of offsets get you blocks, containing offsets.
 // *THOSE* offsets get you the blocks containing the data to figure out what your data is.
 
+PDB_MAGIC := []u8{
+	'M', 'i', 'c', 'r', 'o', 's', 'o', 'f', 't', ' ', 'C', '/', 'C', '+', '+',
+	' ', 'M', 'S', 'F', ' ', '7', '.', '0', '0', '\r', '\n', 0x1A, 0x44, 0x53, 0, 0, 0,
+}
+
+INFO_STREAM_IDX :: 1
+DBI_STREAM_IDX  :: 3
+
+PDB_V70  :: 19990903
+PDB_VC70 :: 20000404
+
+PDB_MSF_Header :: struct #packed {
+	magic:           [32]u8,
+	block_size:         u32,
+	free_block_map_idx: u32,
+	block_count:        u32,
+	directory_size:     u32,
+	reserved:           u32,
+}
+
+PDB_DBI_Header :: struct #packed {
+	signature:                  i32,
+	version:                    u32,
+	age:                        u32,
+	global_stream_idx:          u16,
+	build_idx:                  u16,
+	public_stream_idx:          u16,
+	pdb_dll_version:            u16,
+	sym_record_stream:          u16,
+	pdb_dll_rebuild:            u16,
+	mod_info_size:              i32,
+	section_contrib_size:       i32,
+	section_map_size:           i32,
+	source_info_size:           i32,
+	type_server_size:           i32,
+	mfc_type_server_idx:        u32,
+	optional_debug_header_size: i32,
+	ec_subsystem_size:          i32,
+	flags:                      u16,
+	machine:                    u16,
+	pad:                        u32,
+}
+
+PDB_Info_Stream_Header :: struct #packed {
+	version:   u32,
+	signature: u32,
+	age:       u32,
+	guid:   [16]u8,
+}
+
+PDB_HashTable_Header :: struct #packed {
+	size: u32,
+	capacity: u32,
+}
+
+PDB_HashTable_Entry :: struct #packed {
+	string_offset: u32,
+	stream_idx: u32,
+}
+
+PDB_Names_Header :: struct #packed {
+	magic: u32,
+	hash_version: u32,
+	size: u32,
+}
+
+PDB_Section_Contrib_Entry :: struct #packed {
+	section:    u16,
+	padding:  [2]u8,
+	offset:     i32,
+	size:       i32,
+	flags:      u32,
+	module_idx: u16,
+	padding2: [2]u8,
+	data_crc:   u32,
+	reloc_crc:  u32,
+}
+
+CV_Symbol_Type :: enum u16 {
+	GlobalProc32 = 0x1110,
+	LocalProc32  = 0x110f,
+}
+
+PDB_Symbol_Header :: struct #packed {
+	length: u16,
+	type: CV_Symbol_Type,
+}
+
+PDB_Module_Info :: struct #packed {
+	reserved:             u32,
+	section_contrib:      PDB_Section_Contrib_Entry,
+	flags:                u16,
+	module_symbol_stream: u16,
+	symbols_size:         u32,
+	c11_size:             u32,
+	c13_size:             u32,
+	source_file_count:    u16,
+	padding:            [2]u8,
+	reserved2:            u32,
+	source_file_name_idx: u32,
+	file_path_name_idx:   u32,
+}
+
+CV_Proc32 :: struct #packed {
+	record_length:    u16,
+	record_type:      u16,
+	parent_offset:    u32,
+	block_end_offset: u32,
+	next_offset:      u32,
+	proc_length:      u32,
+	dbg_start_offset: u32,
+	dbg_end_offset:   u32,
+	type_id:          u32,
+	offset:           u32,
+	section_idx:      u16,
+	flags:             u8,
+}
+
+PDB_Debug_Subsection_Type :: enum u32 {
+	Ignore            =    0,
+	Symbols           = 0xF1,
+	Lines             = 0xF2,
+	StringTable       = 0xF3,
+	FileChecksums     = 0xF4,
+	FrameData         = 0xF5,
+	InlineLines       = 0xF6,
+	CrossScopeImports = 0xF7,
+	CrossScopeExports = 0xF8,
+	InlineLinesEx     = 0xF9,
+	FuncMDTokenMap    = 0xFA,
+	TypeMDTokenMap    = 0xFB,
+	MergedAsmInput    = 0xFC,
+	COFFSymbolRva     = 0xFD,
+}
+
+PDB_Debug_Subsection_Header :: struct #packed {
+	type: PDB_Debug_Subsection_Type,
+	length: u32,
+}
+
+PDB_Line :: struct #packed {
+	offset: u32,
+	things: u32,
+}
+
+PDB_Line_Header :: struct #packed {
+	offset:      u32,
+	index:       u16,
+	has_columns: u16,
+	code_size:   u32,
+}
+PDB_Line_File_Block_Header :: struct #packed {
+	file_checksum_offset: u32,
+	line_count: u32,
+	size: u32,
+}
+
+PDB_Inline_Line_Type :: enum u32 {
+	Signature   = 0,
+	SignatureEx = 1,
+}
+PDB_Inline_Line_Header :: struct #packed {
+	type: PDB_Inline_Line_Type,
+}
+PDB_Inline_Line :: struct #packed {
+	type: PDB_Inline_Line_Type,
+	inlinee: u32,
+	file_checksum_offset: u32,
+	line_header: u32,
+}
+PDB_Inline_Line_Ex :: struct #packed {
+	type: PDB_Inline_Line_Type,
+	inlinee: u32,
+	file_checksum_offset: u32,
+	line_header: u32,
+	extra_lines: u32,
+}
+
+PDB_File_Checksum_Header :: struct #packed {
+	filename_offset: u32,
+	checksum_size:    u8,
+	checksum_type:    u8,
+}
+
+Line :: struct {
+	address: u64,
+	file_idx: u32,
+	number: u32,
+	inline: bool,
+}
+
 load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool {
 	msf_hdr := slice_to_type(pdb_buffer, PDB_MSF_Header) or_return
 	if !bytes.equal(msf_hdr.magic[:], PDB_MAGIC) {
@@ -143,12 +334,13 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 
 					base_addr := base_address_for_section(section_buffer, proc_symbol.section_idx - 1) or_return
 
-					symbol_addr := base_addr + u64(proc_symbol.offset)
-					interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
-					am_insert(&trace.addr_map, symbol_addr, interned_symbol)
+					low_pc := base_addr + u64(proc_symbol.offset)
+					high_pc := low_pc + u64(proc_symbol.proc_length)
+					sym_idx := in_get(&trace.intern, &trace.string_block, symbol_name)
+					non_zero_append(&trace.functions, Function{name = sym_idx, low_pc = low_pc, high_pc = high_pc})
 
 					if !symbol_found && symbol_name == "spall_auto_init" {
-						skew_size = trace.skew_address - symbol_addr
+						skew_size = trace.skew_address - low_pc
 						symbol_found = true
 					}
 				}
@@ -207,7 +399,7 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 								panic("Out of Memory!\n")
 							}
 
-							non_zero_append(&trace.line_info, Line_Info{line_addr + u64(line.offset) + skew_size, u64(line_num), interned_name})
+							non_zero_append(&trace.line_info, Line_Info{line_addr + u64(line.offset), u64(line_num), interned_name})
 							cur_offset += size_of(PDB_Line)
 						}
 
@@ -228,7 +420,7 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 		}
 	}
 
-	am_skew(&trace.addr_map, skew_size)
+	trace.skew_size = skew_size
 	return true
 }
 

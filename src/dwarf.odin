@@ -907,7 +907,7 @@ parse_die :: proc(ctx: ^DWARF_Context, rdr: ^Stream_Context, abbrevs: []Abbrev_U
 	return int(abbrev_idx), .Pass
 }
 
-parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> (low_pc: u64, ok: bool) {
+parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data, sym_idx: u64, functions: ^[dynamic]Function) -> (ok: bool) {
 	new_low := max(u64)
 
 	ranges_off : u64 = 0
@@ -931,6 +931,8 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> 
 		return
 	}
 
+	base_addr : u64 = cu.low_pc
+
 	switch ctx.version {
 	case 5:
 		if len(ctx.sections.rnglists) <= int(ranges_off) {
@@ -938,7 +940,6 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> 
 		}
 
 		rnglist := ctx.sections.rnglists[ranges_off:]
-		base_addr : u64 = cu.low_pc
 		rdr := stream_init(rnglist)
 
 		still_scanning := true
@@ -962,7 +963,7 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> 
 				low_pc := read_debug_addr(ctx, cu, start_idx) or_return
 				high_pc := read_debug_addr(ctx, cu, end_idx) or_return
 
-				new_low = min(new_low, low_pc)
+				non_zero_append(functions, Function{name = sym_idx, low_pc = low_pc, high_pc = high_pc})
 
 			case .startx_length:
 				start_idx := stream_uleb(&rdr) or_return
@@ -970,13 +971,13 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> 
 
 				low_pc := read_debug_addr(ctx, cu, start_idx) or_return
 
-				new_low = min(new_low, low_pc)
+				non_zero_append(functions, Function{name = sym_idx, low_pc = low_pc, high_pc = low_pc + length})
 
 			case .offset_pair:
 				low_pc  := stream_uleb(&rdr) or_return
 				high_pc := stream_uleb(&rdr) or_return
 
-				new_low = min(new_low, low_pc)
+				non_zero_append(functions, Function{name = sym_idx, low_pc = base_addr + low_pc, high_pc = base_addr + high_pc})
 
 			case .base_address:
 				addr := stream_val(&rdr, u64) or_return
@@ -986,14 +987,14 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> 
 				low_pc := stream_val(&rdr, u64) or_return
 				high_pc := stream_val(&rdr, u64) or_return
 				
-				new_low = min(new_low, low_pc)
+				non_zero_append(functions, Function{name = sym_idx, low_pc = low_pc, high_pc = high_pc})
 
 			case .start_length:
 				addr := stream_val(&rdr, u64) or_return
 				length := stream_uleb(&rdr) or_return
 
-				new_low = min(new_low, addr)
-
+				non_zero_append(functions, Function{name = sym_idx, low_pc = addr, high_pc = addr + length})
+				
 			case:
 				fmt.printf("unhandled range type: %v\n", type)
 				assert(false)
@@ -1019,14 +1020,18 @@ parse_range_table :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, val: Attr_Data) -> 
 				still_scanning = false
 				continue
 			}
+
+			if low_pc == max(u64) {
+				base_addr = high_pc
+			}
 			
-			new_low = min(new_low, low_pc)
+			non_zero_append(functions, Function{name = sym_idx, low_pc = base_addr + low_pc, high_pc = base_addr + high_pc})
 		}
 	case:
 		panic("Ranges for DWARF %v not supported!\n", ctx.version)
 	}
 
-	return new_low, true
+	return true
 }
 
 parse_line_header :: proc(ctx: ^DWARF_Context, rdr: ^Stream_Context) -> (out_hdr: DWARF_Line_Header, ok: bool) {
@@ -1447,7 +1452,7 @@ process_line_info :: proc(trace: ^Trace, ctx: ^DWARF_Context, cu_files_list: ^[d
 	return true
 }
 
-load_dwarf :: proc(trace: ^Trace, sections: ^Sections, _skew_size: u64) -> bool {
+load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 	ctx := DWARF_Context{}
 	ctx.sections = sections
 
@@ -1462,13 +1467,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, _skew_size: u64) -> bool 
 	defer cleanup_au_offsets(&au_offset_map)
 
 	init_abbrevs(&ctx, &au_offset_map) or_return
-
-	symbol_found := false
-	skew_size : u64 = 0
-	if _skew_size != 0 {
-		symbol_found = true
-		skew_size = _skew_size
-	}
 
 	attr_scratch := make([dynamic]Attr_Result)
 	attr_scratch2 := make([dynamic]Attr_Result)
@@ -1611,6 +1609,8 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, _skew_size: u64) -> bool 
 				if func_name == "" {
 					break
 				}
+				sym_idx := in_get(&trace.intern, &trace.string_block, string(func_name))
+				symbol_addr := 0
 
 				// determine function range
 				low_pc, ok := get_attr_addr(&ctx, &cu, attr_scratch[:], .low_pc)
@@ -1627,36 +1627,26 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, _skew_size: u64) -> bool 
 						fmt.printf("Invalid function range!\n")
 						return false
 					}
+					non_zero_append(&trace.functions, Function{name = sym_idx, low_pc = low_pc, high_pc = high_pc})
 				} else {
 					ranges_val := get_attr(attr_scratch[:], .ranges)
 					if ranges_val != nil {
-						low_pc, ok = parse_range_table(&ctx, &cu, ranges_val)
-						if !ok {
+						if !parse_range_table(&ctx, &cu, ranges_val, sym_idx, &trace.functions) {
 							break
 						}
 					}
-				}
-
-				symbol_addr := low_pc
-				interned_symbol := in_get(&trace.intern, &trace.string_block, string(func_name))
-				am_insert(&trace.addr_map, symbol_addr, interned_symbol)
-
-				if !symbol_found && func_name == "spall_auto_init" {
-					skew_size = trace.skew_address - symbol_addr
-					symbol_found = true
 				}
 			}
 		}
 
 		cur_cu_offset = next_cu_offset
 	}
-	if !symbol_found {
+	if trace.skew_size == 0 {
 		fmt.printf("Could not find \"spall_auto_init\" to address skew?\n")
 		return false
 	}
 
-	fmt.printf("Found skew: 0x%x\n", skew_size)
-	am_skew(&trace.addr_map, skew_size)
+	fmt.printf("Found skew: 0x%x\n", trace.skew_size)
 
 	fmt.printf("DWARF: sorting lines\n")
 	for &cu, c_idx in cu_files_list {
@@ -1665,14 +1655,19 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, _skew_size: u64) -> bool 
 			if !ok {
 				continue
 			}
-			non_zero_append(&trace.line_info, Line_Info{line.address + skew_size, line.line_num, name})
+			non_zero_append(&trace.line_info, Line_Info{line.address, line.line_num, name})
 		}
-
 	}
 	line_order :: proc(a, b: Line_Info) -> bool {
 		return a.address < b.address
 	}
 	slice.sort_by(trace.line_info[:], line_order)
+
+	fmt.printf("DWARF: sorting functions\n")
+	func_order :: proc(a, b: Function) -> bool {
+		return a.low_pc < b.low_pc
+	}
+	slice.sort_by(trace.functions[:], func_order)
 
 	return true
 }

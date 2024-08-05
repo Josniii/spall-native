@@ -125,8 +125,11 @@ load_macho_symbols :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 			return false
 		}
 
-		interned_symbol := in_get(&trace.intern, &trace.string_block, demangled_name)
-		am_insert(&trace.addr_map, symbol.value, interned_symbol)
+		sym_idx := in_get(&trace.intern, &trace.string_block, demangled_name)
+		non_zero_append(&trace.functions, Function{name = sym_idx, low_pc = symbol.value, high_pc = symbol.value})
+		if trace.skew_size == 0 && (symbol_name == "spall_auto_init" || symbol_name == "_spall_auto_init") {
+			trace.skew_size = trace.skew_address - symbol.value
+		}
 	}
 
 	return true
@@ -199,7 +202,7 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	sections.ranges    = create_subbuffer(exec_buffer, u64(ranges_section.offset),  ranges_section.size) or_return
 
 	// Start parsing DWARF normally from here
-	if !load_dwarf(trace, &sections, 0) {
+	if !load_dwarf(trace, &sections) {
 		fmt.printf("DWARF parsing failed!\n")
 	}
 

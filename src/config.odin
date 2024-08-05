@@ -88,7 +88,7 @@ free_trace :: proc(trace: ^Trace) {
 	delete(trace.stats.selected_ranges)
 	sm_free(&trace.stats.stat_map)
 	in_free(&trace.intern)
-	am_free(&trace.addr_map)
+	delete(trace.functions)
 }
 
 bound_duration :: proc(ev: ^Event, max_ts: i64) -> i64 {
@@ -498,7 +498,7 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 		return false
 	}
 
-	fmt.printf("Loaded %s symbols!\n", tens_fmt(u64(len(trace.addr_map.entries))))
+	fmt.printf("Loaded %s function entries!\n", tens_fmt(u64(len(trace.functions))))
 
 	return true
 }
@@ -508,7 +508,7 @@ init_trace_allocs :: proc(trace: ^Trace, file_name: string) {
 	trace.process_map  = vh_init()
 	trace.string_block = make([dynamic]string)
 	trace.intern       = in_init()
-	trace.addr_map     = am_init()
+	trace.functions    = make([dynamic]Function)
 
 	trace.stats.selected_ranges = make([dynamic]Range)
 	trace.stats.stat_map        = sm_init()
@@ -722,7 +722,7 @@ ev_name :: proc(trace: ^Trace, ev: ^Event) -> string {
 	if !ev.has_addr {
 		return in_getstr(&trace.string_block, ev.id)
 	}
-	name_idx, ok := am_find(&trace.addr_map, ev.id)
+	name_idx, ok := get_function(trace, ev.id)
 	if !ok {
 		tmp_buf := make([]byte, 18, context.temp_allocator)
 		return u64_to_hexstr(tmp_buf, ev.id)
@@ -730,10 +730,54 @@ ev_name :: proc(trace: ^Trace, ev: ^Event) -> string {
 	return in_getstr(&trace.string_block, name_idx)
 }
 
-get_line_info :: proc(trace: ^Trace, addr: u64) -> (string, u64, bool) {
+get_function :: proc(trace: ^Trace, _addr: u64) -> (u64, bool) {
+	if len(trace.functions) == 0 {
+		return 0, false
+	}
+
+	addr := _addr - trace.skew_size
+
+	low_pc := trace.functions[0].low_pc
+	high_pc := trace.functions[len(trace.functions)-1].high_pc
+
+	// make sure address is within function bounds
+	if low_pc > addr || high_pc < addr {
+		return 0, false
+	}
+
+	low := 0
+	max := len(trace.functions)
+	high := max - 1
+
+	for low < high {
+		mid := (low + high) / 2
+
+		function := trace.functions[mid]
+		if addr >= function.low_pc && addr <= function.high_pc {
+			return function.name, true
+		} else if addr >= function.high_pc { 
+			low = mid + 1
+		} else { 
+			high = mid - 1
+		}
+	}
+
+	function := trace.functions[low]
+
+	if addr >= function.low_pc && addr <= function.high_pc {
+		return function.name, true
+	}
+
+	fmt.printf("Failed to match: 0x%08x | looking at 0x%08x -> 0x%08x\n", addr, function.low_pc, function.high_pc)
+	return 0, false
+}
+
+get_line_info :: proc(trace: ^Trace, _addr: u64) -> (string, u64, bool) {
 	if len(trace.line_info) == 0 {
 		return "", 0, false
 	}
+
+	addr := _addr - trace.skew_size
 
 	line_info_start := trace.line_info[0].address
 	line_info_end := trace.line_info[len(trace.line_info)-1].address

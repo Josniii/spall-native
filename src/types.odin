@@ -278,6 +278,12 @@ Stats :: struct {
 	released_event:  EventID,
 }
 
+Function :: struct {
+	name: u64,
+	low_pc: u64,
+	high_pc: u64,
+}
+
 Line_Info :: struct {
 	address:  u64,
 	line_num: u64,
@@ -298,16 +304,17 @@ Trace :: struct {
 	intern: INMap,
 	string_block: [dynamic]string,
 
-	skew_address: u64,
-	addr_map: AMMap,
+	skew_address:                u64,
+	skew_size:                   u64,
+	filename_map:     strings.Intern,
+	line_info:    [dynamic]Line_Info,
+	functions:     [dynamic]Function,
+
 	color_choices: [COLOR_CHOICES]FVec3,
 
 	processes: [dynamic]Process,
 	process_map: ValHash,
 	global_instants: [dynamic]Instant,
-
-	filename_map: strings.Intern,
-	line_info: [dynamic]Line_Info,
 
 	total_max_time: i64,
 	total_min_time: i64,
