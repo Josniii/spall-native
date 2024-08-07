@@ -9,9 +9,9 @@ jobs:
       - name: Grab Spall Dependencies
         run: |
             wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-            sudo add-apt-repository 'deb http://apt.llvm.org/focal/ llvm-toolchain-focal-17 main'
+            sudo add-apt-repository 'deb http://apt.llvm.org/focal/ llvm-toolchain-focal-18 main'
             sudo apt-get update
-            sudo apt install libxcursor-dev libegl-dev clang-17 llvm-17 llvm-17-dev
+            sudo apt install libxcursor-dev libegl-dev clang-18 llvm-18 llvm-18-dev
 
       - name: Checkout Spall
         uses: actions/checkout@v4
@@ -46,8 +46,8 @@ jobs:
     steps:
       - name: Grab Spall Dependencies
         run: |
-          brew install sdl2 llvm@17
-          echo "/usr/local/opt/llvm@17/bin" >> $GITHUB_PATH
+          brew install sdl2 llvm@18
+          echo "/usr/local/opt/llvm@18/bin" >> $GITHUB_PATH
     
       - name: Checkout Spall
         uses: actions/checkout@v4
@@ -80,8 +80,8 @@ jobs:
     steps:
       - name: Grab Spall Dependencies
         run: |
-          brew install sdl2 llvm@17
-          echo "/opt/homebrew/opt/llvm@17/bin" >> $GITHUB_PATH
+          brew install sdl2 llvm@18
+          echo "/opt/homebrew/opt/llvm@18/bin" >> $GITHUB_PATH
     
       - name: Checkout Spall
         uses: actions/checkout@v4
