@@ -7,8 +7,6 @@ import "core:slice"
 import "core:encoding/varint"
 import "core:reflect"
 
-LOG_SPAM := false
-
 Sections :: struct {
 	debug_str:   []u8,
 	str_offsets: []u8,
@@ -1150,7 +1148,7 @@ process_line_info :: proc(trace: ^Trace, ctx: ^DWARF_Context, cu_files_list: ^[d
 			fmt.printf("Only supporting DWARF32 for now!\n")
 			return false 
 		}
-		if unit_length == 0 { continue }
+		if unit_length == 0 { break }
 
 		version := stream_val(&rdr, u16) or_return
 		if !(version == 3 || version == 4 || version == 5) {
@@ -1482,6 +1480,9 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 			fmt.printf("Only supporting DWARF32 for now!\n")
 			return false 
 		}
+		if unit_length == 0 {
+			break
+		}
 		next_offset := 4 + unit_length
 
 		ctx.bits_32 = true
@@ -1521,12 +1522,12 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 
 			au := cu.abbrevs[au_idx]
 
-			/*
+/*
 			fmt.printf("0x%08x\n", block_offset)
 			for attr, idx in attr_scratch {
 				fmt.printf("\t%s - %s(%v)\n", attr.id, au.attrs[idx].form_id, attr.val)
 			}
-			*/
+*/
 
 			#partial switch au.type {
 			case .compile_unit:

@@ -221,7 +221,8 @@ Cmd_Options :: struct {
 	file: string `args:"pos=0" usage:"Trace file to load"`,
 	terminal_mode: bool `args:"hidden, name=terminal-mode" usage:"Loads traces headlessly"`,
 	full_speed: bool `args:"hidden, name=full-speed" usage:"Disables power-limiter to max out framerate"`,
-	symbol_path: string `args:"name=symbol-path" usage:"Overrides symbol path for trace files"`,
+	exe_path: string `args:"name=exe-path" usage:"Overrides exe path for trace files"`,
+	pdb_path: string `args:"name=pdb-path" usage:"Overrides pdb path for trace files"`,
 }
 
 main :: proc() {

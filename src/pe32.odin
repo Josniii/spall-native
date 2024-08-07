@@ -103,55 +103,128 @@ COFF_Debug_Entry :: struct #packed {
 	age:         u32,
 }
 
+COFF_Symbol :: struct #packed {
+	name:          [8]u8,
+	value:           u32,
+	section_num:     u16,
+	type:            u16,
+	storage_class:    u8,
+	aux_symbol_count: u8,
+}
+
+// 6 is always debug
+DEBUG_DIR :: 6
+
+get_pdb_path :: proc(rdr: ^Stream_Context, section_hdr: COFF_Section_Header, debug_rva: u32) -> (name: string, ok: bool) {
+	start := section_hdr.virtual_addr
+	end   := start + section_hdr.virtual_size
+
+	if debug_rva < start || (debug_rva + size_of(COFF_Debug_Directory)) > end {
+		return
+	}
+
+	section_relative_offset := debug_rva - start
+	dir_offset := section_hdr.raw_data_offset + section_relative_offset
+
+	stream_set(rdr, int(dir_offset))
+	debug_dir := stream_val(rdr, COFF_Debug_Directory) or_return
+	if debug_dir.type != DEBUG_TYPE_CODEVIEW {
+		return
+	}
+
+	if debug_dir.data_size <= size_of(COFF_Debug_Entry) {
+		return
+	}
+
+	stream_set(rdr, int(debug_dir.raw_data_offset + size_of(COFF_Debug_Entry)))
+	pdb_cstr := stream_cstring(rdr) or_return
+	return string(pdb_cstr), true
+}
+
 load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	pdb_path := ""
 	dos_end_offset := 0x3c
-	pe_hdr_offset := slice_to_type(exec_buffer[dos_end_offset:], u32) or_return
 
-	cur_offset := int(pe_hdr_offset)
-	pe_hdr := slice_to_type(exec_buffer[cur_offset:], PE32_Header) or_return
+	rdr := stream_init(exec_buffer, dos_end_offset)
+	pe_hdr_offset := stream_val(&rdr, u32) or_return
 
+	stream_set(&rdr, int(pe_hdr_offset))
+	pe_hdr := stream_val(&rdr, PE32_Header) or_return
 	if !bytes.equal(pe_hdr.magic[:], PE32_MAGIC) {
 		return false
 	}
 
-	cur_offset += size_of(PE32_Header)
-	section_buffer := exec_buffer[cur_offset:]
+	string_table_offset := pe_hdr.coff_header.symbol_table_offset + (pe_hdr.coff_header.symbol_count * size_of(COFF_Symbol))
+	string_table := exec_buffer[string_table_offset:]
+	strtab_size := slice_to_type(string_table, u32) or_return
+
+	section_buffer := rdr.buffer[rdr.idx:]
 	section_bytes := (size_of(COFF_Section_Header) * int(pe_hdr.coff_header.section_count))
 
-	// 6 is always debug
-	debug_rva := pe_hdr.optional_header.data_directories[6].virtual_addr
+	debug_rva := pe_hdr.optional_header.data_directories[DEBUG_DIR].virtual_addr
+	debug_size := pe_hdr.optional_header.data_directories[DEBUG_DIR].size
+
+	might_have_pdb := true
+	sections := Sections{}
+
 	for i := 0; i < int(pe_hdr.coff_header.section_count); i += 1 {
-		section_offset := i * size_of(COFF_Section_Header)
-		section_hdr := slice_to_type(section_buffer[section_offset:], COFF_Section_Header) or_return
 
-		start := section_hdr.virtual_addr
-		end   := start + section_hdr.virtual_size
-		if debug_rva < start || (debug_rva + size_of(COFF_Debug_Directory)) > end {
-			continue
-		}
+		sect_rdr := stream_init(section_buffer[:section_bytes], i * size_of(COFF_Section_Header))
+		section_hdr := stream_val(&sect_rdr, COFF_Section_Header) or_return
 
-		section_relative_offset := debug_rva - start
-		dir_offset := section_hdr.raw_data_offset + section_relative_offset
-		debug_dir := slice_to_type(exec_buffer[dir_offset:], COFF_Debug_Directory) or_return
-		if debug_dir.type != DEBUG_TYPE_CODEVIEW {
+		if might_have_pdb {
+			path, ok := get_pdb_path(&rdr, section_hdr, debug_rva)
+			if !ok { continue }
+			if path == "" { might_have_pdb = false; continue }
+			pdb_path = path
 			break
 		}
 
-		if debug_dir.data_size <= size_of(COFF_Debug_Entry) {
-			break
+
+		section_name := string(section_hdr.name[:])
+		if section_name[0] == '/' {
+			idx_str := string(cstring(raw_data(section_name[1:])))
+			idx := parse_u32(idx_str) or_return
+			section_name = string(cstring(raw_data(string_table[idx:])))
 		}
 
-		pdb_path = string(cstring(raw_data(exec_buffer[debug_dir.raw_data_offset+size_of(COFF_Debug_Entry):])))
-		break
-	}
-	if pdb_path == "" {
-		return false
+		start := u64(section_hdr.raw_data_offset)
+		size  := u64(section_hdr.raw_data_size)
+		switch section_name {
+		case ".debug_line":
+			sections.line        = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_str":
+			sections.debug_str   = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_str_offsets":
+			sections.str_offsets = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_line_str":
+			sections.line_str    = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_info":
+			sections.info        = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_abbrev":
+			sections.abbrev      = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_addr":
+			sections.addr        = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_ranges":
+			sections.ranges      = create_subbuffer(exec_buffer, start, size) or_return
+		case ".debug_rnglists":
+			sections.rnglists    = create_subbuffer(exec_buffer, start, size) or_return
+		}
 	}
 
-	fmt.printf("PDB is at %s\n", pdb_path)
-	pdb_buffer := os.read_entire_file_from_filename(pdb_path) or_return
-	defer delete(pdb_buffer)
+	// I think we've got a PDB file
+	if might_have_pdb && pdb_path != "" {
+		if opt.pdb_path != "" {
+			pdb_path = opt.pdb_path
+		}
+		fmt.printf("PDB is at %s\n", pdb_path)
+		pdb_buffer := os.read_entire_file_from_filename(pdb_path) or_return
+		defer delete(pdb_buffer)
 
-	return load_pdb(trace, section_buffer, pdb_buffer)
+		return load_pdb(trace, section_buffer, pdb_buffer)
+
+	// Do we have DWARF?
+	} else {
+		return load_dwarf(trace, &sections)
+	}
 }
