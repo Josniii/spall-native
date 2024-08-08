@@ -166,7 +166,7 @@ SPALL_FN void spall_pause(void) {
 
 typedef struct SpallHeader {
     uint64_t magic_header; // = 0xABADF00D
-    uint64_t version; // = 2
+    uint64_t version; // = 3
     double   timestamp_unit;
     uint64_t base_address;
     uint16_t program_path_len;
@@ -791,7 +791,7 @@ SPALL_NOINSTRUMENT SPALL_FORCE_NOINLINE bool spall_auto_init(char *filename) {
     spall_ctx.stamp_scale = spall_get_clock_multiplier();
     SpallHeader header = {0};
     header.magic_header = 0xABADF00D;
-    header.version = 2;
+    header.version = 3;
     header.timestamp_unit = spall_ctx.stamp_scale;
     header.base_address = spall_auto_get_base_address();
 

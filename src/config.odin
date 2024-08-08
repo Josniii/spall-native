@@ -614,11 +614,11 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 			return
 		}
 
-        if hdr.version == 1 {
-			post_error(trace, "Support for auto-tracing v1 has been dropped in this version, please grab the new header!")
+        if hdr.version < 3 {
+			post_error(trace, "Support for auto-tracing v%d has been dropped in this version, please grab the new header!", hdr.version)
 			return
         }
-		if hdr.version != 2 {
+		if hdr.version != 3 {
 			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
 		}
