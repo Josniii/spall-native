@@ -275,7 +275,7 @@ SPALL_FN uint64_t spall_auto_get_base_address(void) {
 }
 
 SPALL_FN bool get_program_path(char **out_path) {
-    char path[PATH_MAX] = {0};
+    char path[PATH_MAX+1] = {0};
     uint32_t size = sizeof(path);
 
     ssize_t buff_len = (ssize_t)readlink("/proc/self/exe", path, size - 1);
@@ -284,7 +284,7 @@ SPALL_FN bool get_program_path(char **out_path) {
         return false;
     }
 
-    char *post_path = (char *)calloc(PATH_MAX, 1);
+    char *post_path = (char *)calloc(PATH_MAX+1, 1);
     if (realpath(path, post_path) == NULL) {
         free(post_path);
         *out_path = NULL;
