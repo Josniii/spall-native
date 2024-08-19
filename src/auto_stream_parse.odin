@@ -70,6 +70,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		caller_id := current_caller^
 		timestamp := current_time^
 
+
 		if thread.max_time > timestamp {
 			post_error(trace, 
 				"Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event_count: %d]", 
@@ -77,7 +78,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			return .Failure
 		}
 
-		process.min_time = min(process.min_time, timestamp)
 		thread.min_time  = min(thread.min_time, timestamp)
 		thread.max_time  = timestamp
 
@@ -111,6 +111,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
 
 		ts := current_time^ + i64(dt)
+
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
 			thread.current_depth -= 1
@@ -173,7 +174,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 				return .Failure
 			}
 
-			process.min_time = min(process.min_time, timestamp)
 			thread.min_time  = min(thread.min_time, timestamp)
 			thread.max_time  = timestamp
 
@@ -296,6 +296,8 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 	for &process in trace.processes {
 		for &thread in process.threads {
 			assert(thread.bande_q.len == thread.current_depth)
+			process.min_time = min(process.min_time, thread.min_time)
+
 			for thread.current_depth > 0 {
 				jev_idx := stack_pop_back(&thread.bande_q)
 				thread.current_depth -= 1
