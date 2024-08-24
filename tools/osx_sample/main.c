@@ -33,18 +33,13 @@ char **setup_envs(char *path, char **envp) {
 }
 
 void sample_task(mach_port_t task) {
+	task_suspend(task);
+
 	thread_act_array_t thread_list;
 	mach_msg_type_number_t thread_count;
 	kern_return_t err = task_threads(task, &thread_list, &thread_count);
 	if (err != 0) {
 		return;
-	}
-
-	printf("Pausing all threads\n");
-	for (int i = 0; i < thread_count; i++) {
-		thread_act_t thread = thread_list[i];
-		thread_suspend(thread);
-
 	}
 
 	printf("Sampling all threads\n");
@@ -63,9 +58,9 @@ void sample_task(mach_port_t task) {
 		printf("RAX: 0x%08llx\n", state.__rax);
 		printf("RBX: 0x%08llx\n", state.__rbx);
 		printf("RCX: 0x%08llx\n", state.__rcx);
-
-		thread_resume(thread);
 	}
+
+	task_resume(task);
 }
 
 int main(int argc, char **argv, char **envp) {
