@@ -57,6 +57,13 @@ typedef struct {
 
 	int fd;
 	uint64_t file_size;
+} StreamContext;
+
+typedef struct {
+	uint8_t *buffer;
+	uint64_t len;
+
+	uint64_t idx;
 } ParseContext;
 
 typedef struct {
@@ -88,60 +95,21 @@ typedef struct {
 	Stack bande_q;
 } Thread;
 
-static void init_parser(ParseContext *ctx, char *filepath) {
-	int buffer_len = 4 * 1024 * 1024;
-	uint8_t *buffer = malloc(buffer_len);
-
-	int fd = open(filepath, O_RDONLY);
-	if (fd < 0) {
-		printf("Failed to open file: %s\n", filepath);
-		exit(1);
-	}
-
-	uint64_t file_size = lseek(fd, 0, SEEK_END);
-	lseek(fd, 0, SEEK_SET);
-
-	ctx->fd = fd;
-	ctx->file_size = file_size;
-
-	ctx->buffer = buffer;
-	ctx->buffer_len = buffer_len;
-	ctx->buffer_pos = 0;
-	ctx->file_pos = 0;
-
-	read(ctx->fd, ctx->buffer, buffer_len);
-}
-
-static void *parser_skim(ParseContext *ctx, uint64_t size, uint64_t offset) {
-	if (offset >= ctx->file_size) {
-		return NULL;
-	}
-
-	pread(ctx->fd, ctx->buffer, size, offset);
-	void *new_data = ctx->buffer;
-	return new_data;
+static ParseContext parser_init(uint8_t *buffer, uint64_t len) {
+	ParseContext ctx;
+	ctx.buffer = buffer;
+	ctx.len = len;
+	ctx.idx = 0;
+	return ctx;
 }
 
 static void *parser_read(ParseContext *ctx, uint64_t size) {
-	if (size > ctx->buffer_len) {
-		printf("Trying to read too much: %llu bytes\n", size);
-		exit(1);
-	}
-
-	if (ctx->file_pos == ctx->file_size) {
+	if (ctx->idx + size > ctx->len) {
 		return NULL;
 	}
 
-	if (ctx->buffer_pos + size > ctx->buffer_len) {
-		pread(ctx->fd, ctx->buffer, ctx->buffer_len, ctx->file_pos);
-		ctx->buffer_pos = 0;
-	}
-
-	void *new_data = ctx->buffer + ctx->buffer_pos;
-
-	ctx->buffer_pos += size;
-	ctx->file_pos += size;
-	
+	void *new_data = ctx->buffer + ctx->idx;
+	ctx->idx += size;
 	return new_data;
 }
 
@@ -171,7 +139,74 @@ static uint64_t parser_read_uval(ParseContext *ctx, uint64_t size) {
 	return ret;
 }
 
-static void parser_seek(ParseContext *ctx, uint64_t offset) {
+uint64_t page_size = 0;
+static void stream_init(StreamContext *ctx, char *filepath) {
+	page_size = sysconf(_SC_PAGE_SIZE);
+
+	uint8_t *buffer;
+	int buffer_len = 4 * page_size * 1024;
+
+	posix_memalign((void **)&buffer, page_size, buffer_len);
+
+	int fd = open(filepath, O_RDONLY);
+	if (fd < 0) {
+		printf("Failed to open file: %s\n", filepath);
+		exit(1);
+	}
+	//fcntl(fd, F_NOCACHE, 1);
+	fcntl(fd, F_RDAHEAD, 1);
+
+	uint64_t file_size = lseek(fd, 0, SEEK_END);
+	lseek(fd, 0, SEEK_SET);
+
+	ctx->fd = fd;
+	ctx->file_size = file_size;
+
+	ctx->buffer = buffer;
+	ctx->buffer_len = buffer_len;
+	ctx->buffer_pos = 0;
+	ctx->file_pos = 0;
+
+	pread(ctx->fd, ctx->buffer, buffer_len, 0);
+}
+
+static void *stream_skim(StreamContext *ctx, uint64_t size, uint64_t offset) {
+	if (offset >= ctx->file_size) {
+		return NULL;
+	}
+
+	pread(ctx->fd, ctx->buffer, size, offset);
+	void *new_data = ctx->buffer;
+	return new_data;
+}
+
+int read_count = 0;
+static void *stream_read(StreamContext *ctx, uint64_t size) {
+	if (size > ctx->buffer_len) {
+		printf("Trying to read too much: %llu bytes\n", size);
+		exit(1);
+	}
+
+	if (ctx->file_pos == ctx->file_size) {
+		return NULL;
+	}
+
+	if (ctx->buffer_pos + size > ctx->buffer_len) {
+		//printf("%d | pos: %llu, size: %llu\n", read_count++, ctx->file_pos, ctx->buffer_len);
+		pread(ctx->fd, ctx->buffer, ctx->buffer_len, ctx->file_pos);
+		ctx->buffer_pos = 0;
+	}
+
+	void *new_data = ctx->buffer + ctx->buffer_pos;
+
+	ctx->buffer_pos += size;
+	ctx->file_pos += size;
+	
+	return new_data;
+}
+
+
+static void stream_seek(StreamContext *ctx, uint64_t offset) {
 	ctx->file_pos = offset;
 	ctx->buffer_pos = 0;
 	pread(ctx->fd, ctx->buffer, ctx->buffer_len, ctx->file_pos);
@@ -201,12 +236,11 @@ int main(int argc, char **argv) {
 	}
 
 	char *in_file = argv[1];
-	char *out_file = argv[1];
-	ParseContext ctx;
+	char *out_file = argv[2];
+	StreamContext ctx;
+	stream_init(&ctx, in_file);
 
-	init_parser(&ctx, in_file);
-
-	Auto_Header *hdr = parser_read(&ctx, sizeof(Auto_Header));
+	Auto_Header *hdr = stream_read(&ctx, sizeof(Auto_Header));
 	if (hdr->magic != AUTO_MAGIC) {
 		printf("Invalid spall-auto trace!\n");
 		return 1;
@@ -221,15 +255,20 @@ int main(int argc, char **argv) {
 
 	uint64_t event_count = 0;
 
-	char *program_path = parser_read(&ctx, hdr->program_path_len);
+	char *program_path = stream_read(&ctx, hdr->program_path_len);
 	uint64_t total_min_time = ~0;
 	uint64_t total_max_time = 0;
 
 	for (;;) {
-		Buffer_Header *bhdr = parser_read(&ctx, sizeof(Buffer_Header));
+		Buffer_Header *bhdr = stream_read(&ctx, sizeof(Buffer_Header));
 		if (bhdr == NULL) {
 			break;
 		}
+
+		printf("size:  0x%08x\n", bhdr->size);
+		printf("tid:   %u\n", bhdr->tid);
+		printf("ts:    %llu\n", bhdr->first_ts);
+		printf("depth: %u\n", bhdr->max_depth);
 
 		Thread *thread = NULL;
 		for (int i = 0; i < threads.size; i++) {
@@ -264,9 +303,12 @@ int main(int argc, char **argv) {
 		uint64_t current_addr   = 0;
 		uint64_t current_caller = 0;
 		uint64_t ev_end = ctx.file_pos + bhdr->size;
-		while (ctx.file_pos < ev_end) {
 
-			uint8_t *type_ptr = parser_read(&ctx, sizeof(uint8_t));
+		uint64_t chunk_size = bhdr->size;
+		uint8_t *chunk_buffer = stream_read(&ctx, chunk_size);
+		ParseContext p_ctx = parser_init(chunk_buffer, chunk_size);
+		while (p_ctx.idx < p_ctx.len) {
+			uint8_t *type_ptr = parser_read(&p_ctx, sizeof(uint8_t));
 			uint8_t type_byte = *type_ptr;
 			uint8_t tag = type_byte >> 6;
 
@@ -277,9 +319,9 @@ int main(int argc, char **argv) {
 					uint8_t caller_size = 1 << (0x03 & type_byte);
 					uint8_t ev_size = 1 + dt_size + addr_size + caller_size;
 
-					uint64_t dt       = parser_read_uval(&ctx, dt_size);
-					uint64_t d_addr   = parser_read_uval(&ctx, addr_size);
-					uint64_t d_caller = parser_read_uval(&ctx, caller_size);
+					uint64_t dt       = parser_read_uval(&p_ctx, dt_size);
+					uint64_t d_addr   = parser_read_uval(&p_ctx, addr_size);
+					uint64_t d_caller = parser_read_uval(&p_ctx, caller_size);
 
 					current_time   = current_time   + dt;
 					current_addr   = current_addr   ^ d_addr;
@@ -291,6 +333,7 @@ int main(int argc, char **argv) {
 					ev.addr   = current_addr;
 					ev.caller = current_caller;
 					ev.self_time = 0;
+					//printf("Event{timestamp: %lld, duration: %lld, addr: 0x%08llx, caller: 0x%08llx}\n", ev.timestamp, ev.duration, ev.addr, ev.caller);
 
 					thread->min_time = min(thread->min_time, current_time);
 					thread->max_time = current_time;
@@ -311,7 +354,7 @@ int main(int argc, char **argv) {
 					uint8_t dt_size = 1 << ((0x30 & type_byte) >> 4);
 					uint8_t ev_size = 1 + dt_size;
 
-					uint64_t dt  = parser_read_uval(&ctx, dt_size);
+					uint64_t dt  = parser_read_uval(&p_ctx, dt_size);
 					current_time = current_time   + dt;
 
 					if (thread->bande_q.len > 0) {
