@@ -1,0 +1,217 @@
+//+build darwin
+
+package main
+
+import "core:fmt"
+import "core:os"
+import "core:os/os2"
+import "core:path/filepath"
+import "core:time"
+import "core:sys/posix"
+import "core:sys/darwin"
+
+Mach_Recv_Msg :: struct {
+	header:    darwin.mach_msg_header_t,
+	body:      darwin.mach_msg_body_t,
+	task_port: darwin.mach_msg_port_descriptor_t,
+	trailer:   darwin.mach_msg_trailer_t,
+}
+
+Mach_Send_Msg :: struct {
+	header:    darwin.mach_msg_header_t,
+	body:      darwin.mach_msg_body_t,
+	task_port: darwin.mach_msg_port_descriptor_t,
+}
+
+sample_x86_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, sample_buffer: ^[dynamic]u64) {
+	state: darwin.x86_thread_state64_t
+	state_count: u32 = darwin.X86_THREAD_STATE64_COUNT
+	if darwin.thread_get_state(thread, darwin.X86_THREAD_STATE64, darwin.thread_state_t(&state), &state_count) != 0 {
+		return
+	}
+
+	fmt.printf("RIP: 0x%08x\n", state.rip)
+	fmt.printf("RSP: 0x%08x\n", state.rsp)
+	append(sample_buffer, state.rip)
+
+	sp := state.rsp
+
+	page: [^]u64
+	page_size : u64 = 4096
+
+	cur_prot : i32 = darwin.VM_PROT_NONE
+	max_prot : i32 = darwin.VM_PROT_NONE
+	if darwin.mach_vm_remap(my_task, &page, page_size, 0, 1, child_task, sp, false, &cur_prot, &max_prot, darwin.VM_INHERIT_SHARE) != 0 {
+		return
+	}
+
+	val := page[0]
+	fmt.printf("top of stack page: 0x%08x\n", val)
+
+	darwin.mach_vm_deallocate(my_task, page, page_size)
+}
+
+sample_task :: proc(my_task: darwin.task_t, child_task: darwin.task_t, sample_buffer: ^[dynamic]u64) -> bool {
+	if darwin.task_suspend(child_task) != 0 {
+		return false
+	}
+
+	thread_list: darwin.thread_list_t
+	thread_count: u32
+	if darwin.task_threads(child_task, &thread_list, &thread_count) != 0 {
+		return false
+	}
+
+	for i : u32 = 0; i < thread_count; i += 1 {
+		thread := thread_list[i]
+
+		id_info := darwin.thread_identifier_info{}
+		count : u32 = darwin.THREAD_IDENTIFIER_INFO_COUNT
+		if darwin.thread_info(thread, darwin.THREAD_IDENTIFIER_INFO, &id_info, &count) != 0 {
+			continue
+		}
+		fmt.printf("thread id: %v\n", id_info.thread_id)
+
+		if ODIN_ARCH == .amd64 {
+			sample_x86_thread(my_task, child_task, thread, sample_buffer)
+		} else {
+			fmt.printf("don't support yet!\n")
+			continue
+		}
+	}
+
+	if darwin.task_resume(child_task) != 0 {
+		return false
+	}
+
+	return true
+}
+
+SampleState :: struct {
+	has_setup:                    bool,
+	my_task:             darwin.task_t,
+	recv_port:      darwin.mach_port_t,
+	bootstrap_port: darwin.mach_port_t,
+}
+
+sample_state := SampleState{}
+sample_child :: proc(program_name: string, args: []string) -> (ok: bool) {
+	if !sample_state.has_setup {
+		sample_state.my_task = darwin.mach_task_self()
+		if darwin.mach_port_allocate(sample_state.my_task, darwin.MACH_PORT_RIGHT_RECEIVE, &sample_state.recv_port) != 0 {
+			fmt.printf("failed to allocate port\n")
+			return
+		}
+
+		if darwin.task_get_special_port(sample_state.my_task, darwin.TASK_BOOTSTRAP_PORT, &sample_state.bootstrap_port) != 0 {
+			fmt.printf("failed to get special port\n")
+			return
+		}
+
+		right: darwin.mach_port_t
+		acquired_right: darwin.mach_port_t
+		if darwin.mach_port_extract_right(sample_state.my_task, u32(sample_state.recv_port), darwin.MACH_MSG_TYPE_MAKE_SEND, &right, &acquired_right) != 0 {
+			fmt.printf("failed to get right\n")
+			return
+		}
+
+		k_err := darwin.bootstrap_register2(sample_state.bootstrap_port, "SPALL_BOOTSTRAP", right, 0)
+		if k_err != 0 {
+			fmt.printf("failed to register bootstrap | got: %v\n", k_err)
+			return
+		}
+
+		sample_state.has_setup = true
+	}
+
+	env_vars := os2.environ(context.temp_allocator)
+	envs := make([dynamic]string, len(env_vars)+1, context.temp_allocator)
+	i := 0
+	for ; i < len(env_vars); i += 1 {
+		envs[i] = string(env_vars[i])
+	}
+
+	dir, err := os2.get_working_directory(context.temp_allocator)
+	if err != nil { return }
+
+	prog_path := program_name
+	if !filepath.is_abs(prog_path) {
+		prog_path = fmt.tprintf("%s/%s", dir, program_name)
+	}
+	
+	envs[i] = fmt.tprintf("DYLD_INSERT_LIBRARIES=%s/tools/osx_dylib_sample/%s", dir, "same.dylib")
+
+	child_pid, err2 := os.posix_spawn(prog_path, args, envs[:], nil, nil)
+	if err2 != nil {
+		fmt.printf("failed to spawn: %s\n", prog_path)
+		return
+	}
+	fmt.printf("Spawned %v\n", child_pid)
+
+	initial_timeout: u32 = 500 // ms
+
+	// Get the Child's task and port
+	recv_msg := Mach_Recv_Msg{}
+	if darwin.mach_msg(&recv_msg, darwin.MACH_RCV_MSG | darwin.MACH_RCV_TIMEOUT, 0, size_of(recv_msg), sample_state.recv_port, initial_timeout, 0) != 0 {
+		fmt.printf("failed to get child task\n")
+		return
+	}
+	child_task := recv_msg.task_port.name
+
+	if darwin.mach_msg(&recv_msg, darwin.MACH_RCV_MSG | darwin.MACH_RCV_TIMEOUT, 0, size_of(recv_msg), sample_state.recv_port, initial_timeout, 0) != 0 {
+		fmt.printf("failed to get child port\n")
+		return
+	}
+	child_port := recv_msg.task_port.name
+
+	vm_offset : u64 = 0
+	vm_size : u64 = 0
+	depth : u32 = 0
+	vbr := darwin.vm_region_submap_info_64{}
+	vbr_count : u32 = darwin.VM_REGION_SUBMAP_INFO_COUNT_64
+	if darwin.mach_vm_region_recurse(child_task, &vm_offset, &vm_size, &depth, darwin.vm_region_recurse_info_t(&vbr), &vbr_count) != 0 {
+		fmt.printf("Failed to get child base address\n")
+		return
+	}
+	fmt.printf("Base address: 0x%08x\n", vm_offset)
+
+	// Send the all clear
+	send_msg := Mach_Send_Msg{}
+	send_msg.header.msgh_remote_port = child_port
+	send_msg.header.msgh_local_port = 0
+	send_msg.header.msgh_bits = darwin.MACH_MSG_TYPE_COPY_SEND | darwin.MACH_MSGH_BITS_COMPLEX
+	send_msg.header.msgh_size = size_of(send_msg)
+
+	send_msg.body.msgh_descriptor_count = 1
+	send_msg.task_port.name = sample_state.my_task
+	send_msg.task_port.disposition = darwin.MACH_MSG_TYPE_COPY_SEND
+	send_msg.task_port.type = darwin.MACH_MSG_PORT_DESCRIPTOR
+	if darwin.mach_msg_send(&send_msg) != 0 {
+		fmt.printf("failed to send all-clear to child\n")
+		return
+	}
+
+	fmt.printf("Resuming child\n")
+
+	rips := make([dynamic]u64)
+
+	for {
+		if !sample_task(sample_state.my_task, child_task, &rips) {
+			break
+		}
+		time.sleep(1 * time.Millisecond)
+	}
+
+	status: i32 = 0
+	posix.waitpid(posix.pid_t(child_pid), &status, nil)
+
+	for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
+		if posix.waitpid(posix.pid_t(child_pid), &status, nil) == -1 {
+			fmt.printf("failed to wait on child\n")
+			return
+		}
+	}
+	fmt.printf("child exited?\n\n")
+
+	return true
+}
