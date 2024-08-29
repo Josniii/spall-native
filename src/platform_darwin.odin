@@ -8,6 +8,7 @@ import "core:path/filepath"
 import "core:sys/posix"
 import "core:os"
 import "core:os/os2"
+import "core:time"
 import "core:sys/darwin"
 import NS "core:sys/darwin/Foundation"
 
@@ -78,39 +79,68 @@ Mach_Send_Msg :: struct {
 	task_port: darwin.mach_msg_port_descriptor_t,
 }
 
-sample_task :: proc(my_task: darwin.task_t, child_task: darwin.task_t) {
-	darwin.task_suspend(child_task)
+sample_x86_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, sample_buffer: ^[dynamic]u64) {
+	state: darwin.x86_thread_state64_t
+	state_count: u32 = darwin.X86_THREAD_STATE64_COUNT
+	if darwin.thread_get_state(thread, darwin.X86_THREAD_STATE64, darwin.thread_state_t(&state), &state_count) != 0 {
+		return
+	}
+
+	fmt.printf("RIP: 0x%08x\n", state.rip)
+	fmt.printf("RSP: 0x%08x\n", state.rsp)
+	append(sample_buffer, state.rip)
+
+	sp := state.rsp
+
+	page: [^]u64
+	page_size : u64 = 4096
+
+	cur_prot : i32 = darwin.VM_PROT_NONE
+	max_prot : i32 = darwin.VM_PROT_NONE
+	if darwin.mach_vm_remap(my_task, &page, page_size, 0, 1, child_task, sp, false, &cur_prot, &max_prot, darwin.VM_INHERIT_SHARE) != 0 {
+		return
+	}
+
+	val := page[0]
+	fmt.printf("top of stack page: 0x%08x\n", val)
+
+	darwin.mach_vm_deallocate(my_task, page, page_size)
+}
+
+sample_task :: proc(my_task: darwin.task_t, child_task: darwin.task_t, sample_buffer: ^[dynamic]u64) -> bool {
+	if darwin.task_suspend(child_task) != 0 {
+		return false
+	}
 
 	thread_list: darwin.thread_list_t
 	thread_count: u32
-	darwin.task_threads(child_task, &thread_list, &thread_count)
+	if darwin.task_threads(child_task, &thread_list, &thread_count) != 0 {
+		return false
+	}
 
 	for i : u32 = 0; i < thread_count; i += 1 {
 		thread := thread_list[i]
 
-		state: darwin.x86_thread_state64_t
-		state_count: u32 = darwin.X86_THREAD_STATE64_COUNT
-		if darwin.thread_get_state(thread, darwin.X86_THREAD_STATE64, darwin.thread_state_t(&state), &state_count) != 0 {
+		id_info := darwin.thread_identifier_info{}
+		count : u32 = darwin.THREAD_IDENTIFIER_INFO_COUNT
+		if darwin.thread_info(thread, darwin.THREAD_IDENTIFIER_INFO, &id_info, &count) != 0 {
 			continue
 		}
+		fmt.printf("thread id: %v\n", id_info.thread_id)
 
-		fmt.printf("RIP: 0x%08x\n", state.rip)
-		fmt.printf("RSP: 0x%08x\n", state.rsp)
-
-		sp := state.rsp
-
-		page: [^]u64
-		cur_prot : i32 = darwin.VM_PROT_NONE
-		max_prot : i32 = darwin.VM_PROT_NONE
-		if darwin.mach_vm_remap(my_task, &page, 4096, 0, 1, child_task, sp, false, &cur_prot, &max_prot, darwin.VM_INHERIT_SHARE) != 0 {
+		if ODIN_ARCH == .amd64 {
+			sample_x86_thread(my_task, child_task, thread, sample_buffer)
+		} else {
+			fmt.printf("don't support yet!\n")
 			continue
 		}
-
-		val := page[0]
-		fmt.printf("top of stack page: 0x%08x\n", val)
 	}
 
-	darwin.task_resume(child_task)
+	if darwin.task_resume(child_task) != 0 {
+		return false
+	}
+
+	return true
 }
 
 SampleState :: struct {
@@ -190,8 +220,6 @@ sample_child :: proc(program_name: string, args: []string) -> (ok: bool) {
 	}
 	child_port := recv_msg.task_port.name
 
-	sample_task(sample_state.my_task, child_task)
-
 	// Send the all clear
 	send_msg := Mach_Send_Msg{}
 	send_msg.header.msgh_remote_port = child_port
@@ -210,14 +238,25 @@ sample_child :: proc(program_name: string, args: []string) -> (ok: bool) {
 
 	fmt.printf("Resuming child\n")
 
+	rips := make([dynamic]u64)
+
+	for {
+		if !sample_task(sample_state.my_task, child_task, &rips) {
+			break
+		}
+		time.sleep(1 * time.Millisecond)
+	}
+
 	status: i32 = 0
+	posix.waitpid(posix.pid_t(child_pid), &status, nil)
+
 	for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
 		if posix.waitpid(posix.pid_t(child_pid), &status, nil) == -1 {
 			fmt.printf("failed to wait on child\n")
 			return
 		}
 	}
-	fmt.printf("child exited?\n")
+	fmt.printf("child exited?\n\n")
 
 	return true
 }
