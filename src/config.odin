@@ -40,7 +40,7 @@ threaded_trace_load :: proc(loader: ^Loader, data: rawptr) {
 	ui_state := state.ui_state
 	free(state)
 
-	total_time     := time.tick_now()
+	trace.load_kickoff = time.tick_now()
 	parse_start    := time.tick_now()
 	load_spall_file(loader, trace, filename)
 	parse_duration := time.tick_since(parse_start)
@@ -51,7 +51,7 @@ threaded_trace_load :: proc(loader: ^Loader, data: rawptr) {
 	pool_wait(&loader.pool)
 	free_trace_temps(trace)
 
-	total_duration := time.tick_since(total_time)
+	total_duration := time.tick_since(trace.load_kickoff)
 	fmt.printf("full load took: %f ms\n", time.duration_milliseconds(total_duration))
 
 	ui_state.loading_config = false
@@ -605,7 +605,6 @@ init_trace :: proc(trace: ^Trace) {
 load_spall_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 	start_time := time.tick_now()
 
-	init_trace(trace)
 	init_trace_allocs(trace, file_name)
 
 	trace_fd, err := os.open(file_name)

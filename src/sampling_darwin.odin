@@ -304,7 +304,6 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 	sample_state.threads = make(map[u64]Sample_Thread)
 	sample_state.program_path = prog_path
 
-	init_trace(trace)
 	init_trace_allocs(trace, program_name)
 
 	for {

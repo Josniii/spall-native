@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:strings"
+import "core:time"
 
 Vec2 :: [2]f64
 FVec2 :: [2]f32
@@ -327,6 +328,7 @@ Trace :: struct {
 	stats: Stats,
 	zoom_event: EventID,
 
+	load_kickoff: time.Tick,
 	error_message: string,
 	error_storage: [4096]u8,
 }

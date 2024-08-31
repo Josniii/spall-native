@@ -2,6 +2,7 @@ package main
 
 import "base:runtime"
 import "core:container/queue"
+import "core:time"
 import "core:fmt"
 import "core:math"
 import "core:slice"
@@ -106,7 +107,7 @@ button :: proc(gfx: ^GFX_Context, in_rect: Rect, label_text, tooltip_text: strin
 		set_cursor(gfx, "pointer")
 		if clicked {
 			return true
-		} else {
+		} else if tooltip_text != "" {
 			tip_pos := Vec2{in_rect.x, in_rect.y + in_rect.h + em}
 			tooltip(gfx, tip_pos, min_x, max_x, tooltip_text)
 		}
@@ -2506,6 +2507,19 @@ draw_main_menu :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt:
 	}
 }
 
+post_load_cleanup :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) {
+	if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 1000 }
+	ui_state.multiselecting = false
+	reset_flamegraph_camera(trace, ui_state)
+
+	if trace.file_name != "" {
+		name := fmt.ctprintf("%s - spall beta 0.2", trace.base_name)
+		set_window_title(gfx, name)
+	}
+	ui_state.post_loading = false
+	ui_state.ui_mode = .TraceView
+}
+
 draw_trace_loading :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt: f64) {
 	offset := trace.parser.offset
 	size := trace.total_size
@@ -2541,17 +2555,42 @@ draw_trace_loading :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState,
 	ui_state.render_one_more = true
 	
 	if ui_state.post_loading {
-		if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 1000 }
-		ui_state.multiselecting = false
-		reset_flamegraph_camera(trace, ui_state)
-
-		if trace.file_name != "" {
-			name := fmt.ctprintf("%s - spall beta 0.2", trace.base_name)
-			set_window_title(gfx, name)
-		}
-		ui_state.post_loading = false
-		ui_state.ui_mode = .TraceView
+		post_load_cleanup(gfx, trace, ui_state)
 	}
 }
 
-draw_sample_running :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt: f64) { }
+draw_sample_running :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt: f64) {
+	p_height  := get_text_height(.PSize, .DefaultFont)
+	h1_height := get_text_height(.H1Size, .DefaultFont)
+
+	form_w := 30 * em
+	form_h := em + p_height
+
+	menu_rect := Rect{0, 0, ui_state.width, ui_state.height}
+	draw_rect(gfx, menu_rect, bg_color)
+
+	line_x := menu_rect.w / 3
+	line_y := (menu_rect.h / 3) + menu_rect.y
+
+	edge_pad := 1 * em
+	button_height := 2 * em
+	button_width  := 2 * em
+	sample_button_text := "Stop"
+	sample_button_width := measure_text(sample_button_text, .PSize, .DefaultFont) + em
+	full_form_w := form_w + edge_pad + button_width
+	stop_sample_rect := Rect{line_x + (full_form_w / 2) - (sample_button_width / 2), line_y, sample_button_width, p_height + (em / 2)}
+
+	total_duration := time.tick_since(trace.load_kickoff)
+	time_text := fmt.tprintf("%.1f s", time.duration_seconds(total_duration))
+
+	draw_text(gfx, time_text, Vec2{ui_state.width / 2, ui_state.height / 2}, .PSize, .DefaultFont, text_color)
+	if button(gfx, stop_sample_rect, sample_button_text, "", .DefaultFont, menu_rect.x, menu_rect.w) {
+		fmt.printf("stopping child\n")
+	}
+
+	ui_state.render_one_more = true
+	
+	if ui_state.post_loading {
+		post_load_cleanup(gfx, trace, ui_state)
+	}
+}

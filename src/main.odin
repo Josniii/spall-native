@@ -131,14 +131,16 @@ threaded_sample_start :: proc(loader: ^Loader, data: rawptr) {
 }
 
 start_sampling :: proc(loader: ^Loader, trace: ^Trace, ui_state: ^UIState, program_name: string, program_args: string) -> bool {
-	if ui_state.loading_config {
+	if ui_state.loading_config || program_name == "" {
 		return false
 	}
 
 	free_trace(trace)
 	init_trace(trace)
+	trace.load_kickoff = time.tick_now()
 	ui_state.loading_config = true
 	ui_state.post_loading = false
+	ui_state.ui_mode = .SampleRunning
 
 	state := new(ThreadSampleRunState)
 	state^ = ThreadSampleRunState{
