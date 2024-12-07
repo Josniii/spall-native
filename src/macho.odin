@@ -240,12 +240,7 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, bucket: ^Func_Bucket)
 		return false
 	}
 
-	abbrev_section    := Mach_Section{}
-	info_section      := Mach_Section{}
-	line_section      := Mach_Section{}
-	debug_str_section := Mach_Section{}
-	ranges_section    := Mach_Section{}
-	found_debug := 0
+	sections := Sections{}
 
 	text_segment_offset : u64 = 0
 	read_idx := size_of(Mach_Header_64)
@@ -272,11 +267,24 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, bucket: ^Func_Bucket)
 					section_name := strings.string_from_null_terminated_ptr(raw_data(section.name[:]), 16)
 
 					switch section_name {
-					case "__debug_abbrev": abbrev_section    = section; found_debug += 1
-					case "__debug_info":   info_section      = section; found_debug += 1
-					case "__debug_line":   line_section      = section; found_debug += 1
-					case "__debug_str":    debug_str_section = section; found_debug += 1
-					case "__debug_ranges": ranges_section    = section; found_debug += 1
+					case "__debug_line":
+						sections.line        = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_str":
+						sections.debug_str   = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_str_offsets":
+						sections.str_offsets = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_line_str":
+						sections.line_str    = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_info":
+						sections.info        = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_abbrev":
+						sections.abbrev      = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_addr":
+						sections.addr        = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_ranges":
+						sections.ranges      = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__debug_rnglists":
+						sections.rnglists    = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
 					}
 
 					sub_idx += size_of(Mach_Section)
@@ -290,19 +298,9 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, bucket: ^Func_Bucket)
 	if read_idx >= len(exec_buffer) {
 		return false
 	}
-	if found_debug < 4 {
-		return false
-	}
 	if text_segment_offset == 0 {
 		return false
 	}
-
-	sections := Sections{}
-	sections.abbrev    = create_subbuffer(exec_buffer, u64(abbrev_section.offset), abbrev_section.size) or_return
-	sections.info      = create_subbuffer(exec_buffer, u64(info_section.offset), info_section.size) or_return
-	sections.line      = create_subbuffer(exec_buffer, u64(line_section.offset), line_section.size) or_return
-	sections.debug_str = create_subbuffer(exec_buffer, u64(debug_str_section.offset),  debug_str_section.size) or_return
-	sections.ranges    = create_subbuffer(exec_buffer, u64(ranges_section.offset),  ranges_section.size) or_return
 
 	if !load_dwarf(trace, &sections, bucket, text_segment_offset) {
 		fmt.printf("DWARF parsing failed!\n")
