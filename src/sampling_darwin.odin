@@ -371,7 +371,11 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 		sample_setup.has_setup = true
 	}
 
-	env_vars := os2.environ(context.temp_allocator)
+	env_vars, e_err := os2.environ(context.temp_allocator)
+    if e_err != nil {
+        fmt.printf("Failed to get environ %v\n", e_err)
+        return
+    }
 	envs := make([dynamic]string, len(env_vars)+1, context.temp_allocator)
 	i := 0
 	for ; i < len(env_vars); i += 1 {
