@@ -128,12 +128,12 @@ sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, t
     append(callstack, state.pc)
 	sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
-	fmt.printf("starting sample\n")
+	//fmt.printf("starting sample\n")
 	fp := state.fp
 	sp := state.sp
 	pc := state.pc
 	for {
-		fmt.printf("pc: %x | sp: %x | fp: %x\n", pc, sp, fp)
+		//fmt.printf("pc: %x | sp: %x | fp: %x\n", pc, sp, fp)
 
 		// If the frame pointer is 0, we're at the top of the stack
 		if fp == 0 {
@@ -148,7 +148,7 @@ sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, t
 		slot, ok := map_child_mem(my_task, child_task, fp, u64)
 		if !ok {
 			fmt.printf("failed to map mem: %x\n", fp)
-				return false
+			return false
 		}
 
 		append(callstack, fp)
