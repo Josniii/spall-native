@@ -62,12 +62,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		d_addr   := pull_uval(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
 		d_caller := pull_uval(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
 
-/*
-		if dt == 0 {
-			dt = 1
-		}
-*/
-
 		current_time^   = current_time^ + i64(dt)
 		current_addr^   = current_addr^ ~ d_addr
 		current_caller^ = current_caller^ ~ d_caller
@@ -106,7 +100,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		trace.event_count += 1
 
 		p.pos += event_sz
-		return .EventRead
 	case 1: // MicroEnd
 		dt_size := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
 		event_sz := 1 + dt_size
@@ -115,11 +108,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		}
 
 		dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
-/*
-		if dt == 0 {
-			dt = 1
-		}
-*/
 
 		ts := current_time^ + i64(dt)
 		//fmt.printf("E | %v -- dt: %v\n", ts, dt)
@@ -147,7 +135,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		
 		current_time^ = ts
 		p.pos += event_sz
-		return .EventRead
 	case 2: // Other Events
 		type := spall_fmt.Auto_Event_Type((0b00_11_00_00 & type_byte) >> 4)
 		#partial switch type {
@@ -176,9 +163,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			id   := in_get(&trace.intern, &trace.string_block, name_str)
 			args := in_get(&trace.intern, &trace.string_block, args_str)
 
-			if dt == 0 {
-				dt = 1
-			}
 			current_time^ = current_time^ + i64(dt)
 			timestamp := current_time^
 
@@ -211,14 +195,16 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			trace.event_count += 1
 
 			p.pos += i
-			return .EventRead
+		case:
+			post_error(trace, "Invalid event type: %d in file!", data_start[0])
+			return .Failure
 		}
 	case:
 		post_error(trace, "Invalid event type: %d in file!", data_start[0])
 		return .Failure
     }
 
-	return .PartialRead
+	return .EventRead
 }
 
 as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {

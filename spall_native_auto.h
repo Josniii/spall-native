@@ -153,9 +153,17 @@ SPALL_FN void spall_pause(void) {
 }
 #elif SPALL_IS_ARM64
 SPALL_FN uint64_t spall_get_clock(void) {
+/*
     uint64_t timer_val;
     asm volatile("mrs %0, cntvct_el0;" : "=r"(timer_val) :: "memory");
     return timer_val;
+*/
+
+	struct timespec tm;
+	clock_gettime(CLOCK_MONOTONIC_RAW, &tm);
+
+	uint64_t nanos = ((uint64_t)tm.tv_sec * 1000000000ULL) + (uint64_t)tm.tv_nsec;
+	return nanos;
 }
 SPALL_FN void spall_pause(void) {
     asm volatile("yield");
@@ -385,11 +393,13 @@ SPALL_FN double spall_get_clock_multiplier(void) {
 }
 #elif SPALL_IS_ARM64
 SPALL_FN double spall_get_clock_multiplier(void) {
+/*
     uint64_t freq_val;
     asm volatile("mrs %0, cntfrq_el0" : "=r"(freq_val));
 
     double multiplier = 1000000000.0 / (double)freq_val;
-    return multiplier;
+*/
+    return 1.0;
 }
 #endif
 
