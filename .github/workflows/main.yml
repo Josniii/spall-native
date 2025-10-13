@@ -78,7 +78,7 @@ jobs:
           ./configure --prefix $(PWD)/out
           make -j
           make install
-          cp out/libSDL2-2.0.0.dylib ../spall/bin/.
+          cp out/lib/libSDL2-2.0.0.dylib ../spall/bin/.
         
       - name: Build Spall
         run: |
@@ -134,7 +134,7 @@ jobs:
           ./configure --prefix $(PWD)/out
           make -j
           make install
-          cp out/libSDL2-2.0.0.dylib ../spall/bin/.
+          cp out/lib/libSDL2-2.0.0.dylib ../spall/bin/.
         
       - name: Build Spall
         run: |
