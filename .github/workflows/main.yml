@@ -58,7 +58,7 @@ jobs:
           repository: Odin-lang/odin
           path: odin
 
-      - name: Checkout SDL
+      - name: Checkout SDL2
         uses: actions/checkout@v4
         with:
           repository: libsdl-org/SDL
@@ -73,9 +73,9 @@ jobs:
 
       - name: Build SDL2
         run: |
+          mkdir sdl_out
           cd SDL
-          mkdir out
-          ./configure --prefix $(PWD)/out
+          ./configure --prefix ../spall/sdl_out
           make -j
           make install
         
@@ -93,7 +93,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sdl2_osx_x86
-          path: ../SDL/out/libSDL2-2.0.0.dylib
+          path: sdl_out/libSDL2-2.0.0.dylib
 
   build_osx_arm:
     name: OSX ARM Build and Test
@@ -113,7 +113,7 @@ jobs:
           repository: Odin-lang/odin
           path: odin
 
-      - name: Checkout SDL
+      - name: Checkout SDL2
         uses: actions/checkout@v4
         with:
           repository: libsdl-org/SDL
@@ -128,9 +128,9 @@ jobs:
 
       - name: Build SDL2
         run: |
+          mkdir sdl_out
           cd SDL
-          mkdir out
-          ./configure --prefix $(PWD)/out
+          ./configure --prefix ../spall/sdl_out
           make -j
           make install
         
@@ -148,7 +148,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sdl2_osx_arm
-          path: ../SDL/out/libSDL2-2.0.0.dylib
+          path: sdl_out/libSDL2-2.0.0.dylib
 
   build_windows:
     name: Windows Build and Test
