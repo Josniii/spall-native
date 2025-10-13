@@ -58,21 +58,42 @@ jobs:
           repository: Odin-lang/odin
           path: odin
 
+      - name: Checkout SDL
+        uses: actions/checkout@v4
+        with:
+          repository: libsdl-org/SDL
+          ref: SDL2
+          path: sdl
+
       - name: Build Odin
         run: |
           cd odin
           ./build_odin.sh
           echo $PWD >> $GITHUB_PATH
+
+      - name: Build SDL2
+        run: |
+          cd SDL
+          mkdir out
+          ./configure --prefix $(PWD)/out
+          make -j
+          make install
         
       - name: Build Spall
         run: |
           ./build.sh release
 
-      - name: Upload artifact
+      - name: Upload Spall
         uses: actions/upload-artifact@v4
         with:
           name: spall_osx_x86
           path: bin/spall
+
+      - name: Upload SDL2
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdl2_osx_x86
+          path: ../SDL/out/libSDL2-2.0.0.dylib
 
   build_osx_arm:
     name: OSX ARM Build and Test
@@ -92,21 +113,42 @@ jobs:
           repository: Odin-lang/odin
           path: odin
 
+      - name: Checkout SDL
+        uses: actions/checkout@v4
+        with:
+          repository: libsdl-org/SDL
+          ref: SDL2
+          path: sdl
+
       - name: Build Odin
         run: |
           cd odin
           ./build_odin.sh
           echo $PWD >> $GITHUB_PATH
+
+      - name: Build SDL2
+        run: |
+          cd SDL
+          mkdir out
+          ./configure --prefix $(PWD)/out
+          make -j
+          make install
         
       - name: Build Spall
         run: |
           ./build.sh release
 
-      - name: Upload artifact
+      - name: Upload Spall
         uses: actions/upload-artifact@v4
         with:
           name: spall_osx_arm
           path: bin/spall
+
+      - name: Upload SDL2
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdl2_osx_arm
+          path: ../SDL/out/libSDL2-2.0.0.dylib
 
   build_windows:
     name: Windows Build and Test
@@ -165,17 +207,29 @@ jobs:
           name: spall_linux
           path: spall_linux
 
-      - name: Grab OSX ARM artifacts
+      - name: Grab OSX Spall ARM artifacts
         uses: actions/download-artifact@v4
         with:
           name: spall_osx_arm
           path: spall_osx_arm          
 
-      - name: Grab OSX X86 artifacts
+      - name: Grab OSX SDL ARM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sdl_osx_arm
+          path: sdl_osx_arm
+
+      - name: Grab OSX Spall X86 artifacts
         uses: actions/download-artifact@v4
         with:
           name: spall_osx_x86
           path: spall_osx_x86
+
+      - name: Grab OSX SDL X86 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sdl_osx_x86
+          path: sdl_osx_x86
         
       - name: Package artifacts
         run: |
@@ -184,8 +238,9 @@ jobs:
           curl -L -o lipo https://github.com/konoui/lipo/releases/latest/download/lipo_Linux_amd64
           chmod +x lipo
           ./lipo -create -output spall spall_osx_arm/spall spall_osx_x86/spall
+          ./lipo -create -output libSDL2-2.0.0.dylib sdl_osx_arm/libSDL2-2.0.0.dylib sdl_osx_x86/libSDL2-2.0.0.dylib
           chmod +x spall
-          ./package_osx.sh spall_pkg/spall.app spall
+          ./package_osx.sh spall_pkg/spall.app spall libSDL2-2.0.0.dylib
 
           cp resources/FiraCode_LICENSE.txt spall_pkg/.
           cp resources/LICENSE.txt          spall_pkg/.
