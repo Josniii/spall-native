@@ -83,7 +83,7 @@ load_trace :: proc(loader: ^Loader, trace: ^Trace, ui_state: ^UIState, trace_nam
 
 real_pos :: proc(p: ^Parser) -> i64 { return p.pos }
 chunk_pos :: proc(p: ^Parser) -> i64 { return p.pos - p.offset }
-get_chunk :: proc(p: ^Parser, fd: os.Handle, chunk_buffer: []u8) -> (int, bool) {
+get_chunk :: proc(p: ^Parser, fd: ^os.File, chunk_buffer: []u8) -> (int, bool) {
 	rd_sz, err2 := os.read_at(fd, chunk_buffer, p.pos)
 	if err2 != nil {
 		return 0, false
