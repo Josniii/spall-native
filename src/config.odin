@@ -548,9 +548,9 @@ load_symbols_task :: proc(pool: ^Pool, raw_args: rawptr) {
 load_executable :: proc(trace: ^Trace, file_name: string, base_addr: u64) -> bool {
 	fmt.printf("Loading symbols from %s\n", file_name)
 
-	exec_buffer, ok := os.read_entire_file_from_filename(file_name)
-	if !ok {
-		post_error(trace, "Failed to load symbols from %s!", file_name)
+	exec_buffer, err := os.read_entire_file(file_name, context.allocator)
+	if err != nil {
+		post_error(trace, "Failed to load symbols from %s! %s", file_name, err)
 		return false
 	}
 	defer delete(exec_buffer)
@@ -578,9 +578,9 @@ load_executable :: proc(trace: ^Trace, file_name: string, base_addr: u64) -> boo
 		}
 
 		debug_file_name := guess_debug_path(file_name)
-		debug_buffer, ok2 := os.read_entire_file_from_filename(debug_file_name)
-		if !ok2 {
-			post_error(trace, "No debug info found!")
+		debug_buffer, err := os.read_entire_file(debug_file_name, context.allocator)
+		if err != nil {
+			post_error(trace, "No debug info found! %s", err)
 			return false
 		}
 		defer delete(debug_buffer)
