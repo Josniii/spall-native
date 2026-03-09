@@ -4,6 +4,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:container/lru"
 
 import SDL "vendor:sdl2"
 import gl "vendor:OpenGL"
@@ -286,6 +287,7 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 					w := f64(event.window.data1)
 					h := f64(event.window.data2)
 					if dpi_hack_val < 0 {
+					    recalculate_dpr(gfx, w, h)
 						w *= dpr
 						h *= dpr
 					}
@@ -343,4 +345,24 @@ set_clipboard :: proc(gfx: ^GFX_Context, text: string) {
 
 set_window_title :: proc(gfx: ^GFX_Context, title: cstring) {
 	SDL.SetWindowTitle(gfx.window, title)
+}
+
+recalculate_dpr :: proc(gfx: ^GFX_Context, w: f64, h: f64) {
+    real_window_width: i32
+    real_window_height: i32
+    SDL.GL_GetDrawableSize(gfx.window, &real_window_width, &real_window_height)
+    new_dpr := f64(real_window_width) / w
+
+    // NOTE(js): sketchy floating point comparison???
+    if new_dpr == dpr {
+        return
+    }
+
+    dpr = new_dpr
+    sizes := []f64{ p_height * dpr, h1_height * dpr, h2_height * dpr }
+    font_size[FontSize.PSize] = cast(f32)sizes[0]
+    font_size[FontSize.H1Size] = cast(f32)sizes[1]
+    font_size[FontSize.H2Size] = cast(f32)sizes[2]
+    lru.clear(&lru_text_cache, true)
+    ch_width = measure_text("a", .PSize, .MonoFont)
 }
