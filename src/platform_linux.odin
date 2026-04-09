@@ -57,7 +57,7 @@ text_cursor: xlib.Cursor
 
 open_file_dialog :: proc() -> (string, bool) {
 	buffer := [4096]u8{}
-	fds := [2]os.Handle{}
+	fds := [2]^os.File{}
 	ret := unix.sys_pipe2(raw_data(&fds), 0)
 
 	pid, err := os.fork()

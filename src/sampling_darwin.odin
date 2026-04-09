@@ -267,7 +267,7 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		}
 
     /*
-		exec_buffer, ok5 := os.read_entire_file_from_filename(file_path)
+		exec_buffer, ok5 := os.read_entire_file(file_path, context.allocator)
 		if !ok5 {
 			continue dylib_loop
 		}
@@ -286,7 +286,7 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		}
 
 		debug_path := guess_debug_path(file_path)
-		debug_buffer, ok6 := os.read_entire_file_from_filename(debug_path)
+		debug_buffer, ok6 := os.read_entire_file(debug_path, context.allocator)
 		if !ok6 {
 			continue dylib_loop
 		}
